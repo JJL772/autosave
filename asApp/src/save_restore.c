@@ -286,6 +286,8 @@ STATIC int statusPvsInUse[NUM_STATUS_PV_SETS] = {0};
 STATIC epicsMutexId	sr_mutex = NULL;			/* mut(ual) ex(clusion) for list of save sets */
 int mustSetPermissions = 0;                                    /* use fchmod() only if save_restoreSet_FilePermissions is used */
 
+SR_log_level_t save_restoreLogLevel = SR_LOG_INFO;
+
 /* Support for manual and programmed operations */
 
 /* in configMenuClient.h
@@ -713,7 +715,7 @@ int manual_save(char *request_file, char *save_file, callbackFunc callbackFuncti
 {
 	op_msg msg;
 
-	if (save_restoreDebug) printf("manual_save: request_file='%s', save_file='%s', callbackFunction=%p, puserPvt=%p\n",
+	SR_DBG(0,"manual_save: request_file='%s', save_file='%s', callbackFunction=%p, puserPvt=%p\n",
 		request_file, save_file, callbackFunction, puserPvt);
 
 	msg.operation = op_SaveFile;
@@ -750,13 +752,13 @@ STATIC void ca_connection_callback(struct connection_handler_args args)
 STATIC void do_mount() {
 	if (save_restoreNFSHostName[0] && save_restoreNFSHostAddr[0] && save_restoreNFSMntPoint[0]) {
 		if (mountFileSystem(save_restoreNFSHostName, save_restoreNFSHostAddr, save_restoreNFSMntPoint, save_restoreNFSMntPoint) == OK) {
-			printf("save_restore:mountFileSystem:successfully mounted '%s'\n", save_restoreNFSMntPoint);
+			SR_INFO("save_restore:mountFileSystem:successfully mounted '%s'\n", save_restoreNFSMntPoint);
 			strNcpy(SR_recentlyStr, "mountFileSystem succeeded", STATUS_STR_LEN);
 			save_restoreIoErrors = 0;
 			save_restoreNFSOK = 1;
 		}
 		else {
-			printf("save_restore: Can't mount '%s'\n", save_restoreNFSMntPoint);
+			SR_ERR("save_restore: Can't mount '%s'\n", save_restoreNFSMntPoint);
 		}
 	} else {
 		save_restoreNFSOK = 1;
@@ -784,9 +786,7 @@ void makeNfsPath(char *dest, const char *s1, const char *s2) {
 	} else {
 		strncat(dest, tmp2, MAX(NFS_PATH_LEN-1 - strlen(dest),0));
 	}
-	if (save_restoreDebug > 2) {
-		printf("save_restore:makeNfsPath: dest='%s'\n", dest);
-	}
+	SR_DBG(2,"save_restore:makeNfsPath: dest='%s'\n", dest);
 }
 
 int testMakeNfsPath() {
@@ -918,7 +918,7 @@ STATIC int save_restore(void)
 
 
 		if (ca_pend_io(0.5)!=ECA_NORMAL) {
-			printf("save_restore: Can't connect to all status PV(s)\n");
+			SR_ERR("save_restore: Can't connect to all status PV(s)\n");
 		}
 		/* Show reboot status */
 		SR_rebootStatus = SR_STATUS_OK;
@@ -996,7 +996,7 @@ STATIC int save_restore(void)
 			/* printf("save_restore: save_restoreNFSOK==0 for %f seconds\n", timeDiff); */
 			if (timeDiff > REMOUNT_CHECK_INTERVAL_SECONDS) {
 				remount_check_time = currTime;                           	/* struct copy */
-				printf("save_restore: attempting to remount filesystem\n");
+				SR_INFO("save_restore: attempting to remount filesystem\n");
 				dismountFileSystem(save_restoreNFSMntPoint);          /* first dismount it */
 				/* We don't care if dismountFileSystem fails.
 				 * It could fail simply because an earlier dismount, succeeded.
@@ -1004,11 +1004,11 @@ STATIC int save_restore(void)
 				if (mountFileSystem(save_restoreNFSHostName, save_restoreNFSHostAddr,
 							save_restoreNFSMntPoint, save_restoreNFSMntPoint) == OK) {
 					just_remounted = 1;
-					printf("save_restore: remounted '%s'\n", save_restoreNFSMntPoint);
+					SR_INFO("save_restore: remounted '%s'\n", save_restoreNFSMntPoint);
 					SR_status = SR_STATUS_OK;
 					strcpy(SR_statusStr, "NFS remounted");
 				} else {
-					printf("save_restore: failed to remount '%s' \n", save_restoreNFSMntPoint);
+					SR_INFO("save_restore: failed to remount '%s' \n", save_restoreNFSMntPoint);
 					SR_status = SR_STATUS_FAIL;
 					strcpy(SR_statusStr, "NFS failed!");
 				}
@@ -1017,13 +1017,11 @@ STATIC int save_restore(void)
 
 		/* look at each list */
 		while (waitForListLock(5) == 0) {
-			if (save_restoreDebug > 1)
-				printf("save_restore: '%s' waiting for listLock()\n", lptr ? lptr->reqFile : "<null>");
+			SR_DBG(1,"save_restore: '%s' waiting for listLock()\n", lptr ? lptr->reqFile : "<null>");
 		}
 		plist = lptr;
 		while (plist != 0) {
-			if (save_restoreDebug >= 30)
-				printf("save_restore: '%s' save_state = 0x%x\n", plist->reqFile, plist->save_state);
+			SR_DBG(30,"save_restore: '%s' save_state = 0x%x\n", plist->reqFile, plist->save_state);
 
 			/* connect the channels on the first instance of this set */
 			if (plist->enabled_method == 0) {
@@ -1036,7 +1034,7 @@ STATIC int save_restore(void)
 						TATTLE(ca_search(plist->saveNamePV,&plist->saveNamePV_chid), "save_restore: ca_search(%s) returned %s", plist->saveNamePV);
 					}
 					if (ca_pend_io(0.5)!=ECA_NORMAL) {
-						printf("save_restore: Can't connect to list-specific path/name PV(s)\n");
+						SR_ERR("save_restore: Can't connect to list-specific path/name PV(s)\n");
 
 						plist->status = SR_STATUS_WARN;
 						strNcpy(plist->statusStr, "List path/name PVs connection failed", STATUS_STR_LEN);
@@ -1071,8 +1069,7 @@ STATIC int save_restore(void)
 					(epicsTimeDiffInSeconds(&currTime, &plist->callback_time) > save_restoreCallbackTimeout)) {
 			    		plist->save_state = plist->save_method;
 
-					if (save_restoreDebug > 1)
-			    			printf("save_restore: Callback time out of %s, force to save!\n", plist->reqFile);
+			    		SR_DBG(1,"save_restore: Callback time out of %s, force to save!\n", plist->reqFile);
 				}
 			}
 
@@ -1167,7 +1164,7 @@ STATIC int save_restore(void)
 		if (save_restoreUseStatusPVs) {
 			/*** set up list-specific status PV's for any new lists ***/
 			while (waitForListLock(5) == 0) {
-				if (save_restoreDebug > 1) printf("save_restore: waiting for listLock()\n");
+				SR_DBG(1,"save_restore: waiting for listLock()\n");
 			}
 			for (plist = lptr; plist; plist = plist->pnext) {
 				/*
@@ -1195,7 +1192,7 @@ STATIC int save_restore(void)
 					TATTLE(ca_search(plist->statusStr_PV, &plist->statusStr_chid), "save_restore: ca_search(%s) returned %s", plist->statusStr_PV);
 					TATTLE(ca_search(plist->time_PV, &plist->time_chid), "save_restore: ca_search(%s) returned %s", plist->time_PV);
 					if (ca_pend_io(0.5)!=ECA_NORMAL) {
-						printf("save_restore: Can't connect to status PV(s) for list '%s'\n", plist->save_file);
+						SR_ERR("save_restore: Can't connect to status PV(s) for list '%s'\n", plist->save_file);
 					}
 				}
 
@@ -1231,16 +1228,16 @@ disable:
 			switch (msg.operation) {
 
 			case op_RestoreFromSaveFile:
-				if (save_restoreDebug) printf("save_restore task: calling do_manual_restore('%s')\n", msg.filename);
+				SR_DBG(0,"save_restore task: calling do_manual_restore('%s')\n", msg.filename);
 				status = do_manual_restore(msg.filename, FROM_SAVE_FILE, NULL);
-				if (save_restoreDebug>1) printf("save_restore: manual restore status=%d (0==success)\n", status);
+				SR_DBG(1,"save_restore: manual restore status=%d (0==success)\n", status);
 				epicsSnprintf(SR_recentlyStr, STATUS_STR_LEN-1, "Restore of '%s' %s", msg.filename, status?"Failed":"Succeeded");
 				break;
 
 			case op_RestoreFromAsciiFile:
-				if (save_restoreDebug) printf("save_restore task: calling do_manual_restore('%s')\n", msg.filename);
+				SR_DBG(0,"save_restore task: calling do_manual_restore('%s')\n", msg.filename);
 				status = do_manual_restore(msg.filename, FROM_ASCII_FILE, msg.macrostring);
-				if (save_restoreDebug>1) printf("save_restore: manual restore status=%d (0==success)\n", status);
+				SR_DBG(1,"save_restore: manual restore status=%d (0==success)\n", status);
 				epicsSnprintf(SR_recentlyStr, STATUS_STR_LEN-1, "Restore of '%s' %s", msg.filename, status?"Failed":"Succeeded");
 				if (status == 0) {
 				    if (!isAbsolute(msg.filename)) {
@@ -1254,9 +1251,9 @@ disable:
 				break;
 
 			case op_Remove:
-				if (save_restoreDebug) printf("save_restore task: calling do_remove_data_set('%s')\n", msg.filename);
+				SR_DBG(0,"save_restore task: calling do_remove_data_set('%s')\n", msg.filename);
 				status = do_remove_data_set(msg.filename);
-				if (save_restoreDebug>1) printf("save_restore: remove status=%d (0==success)\n", status);
+				SR_DBG(1,"save_restore: remove status=%d (0==success)\n", status);
 				epicsSnprintf(SR_recentlyStr, STATUS_STR_LEN-1, "Remove '%s' %s", msg.filename, status?"Failed":"Succeeded");
 				break;
 
@@ -1264,9 +1261,9 @@ disable:
 			case op_ReloadTriggeredSet:
 			case op_ReloadMonitorSet:
 			case op_ReloadManualSet:
-				if (save_restoreDebug) printf("save_restore task: calling do_remove_data_set('%s')\n", msg.filename);
+				SR_DBG(0,"save_restore task: calling do_remove_data_set('%s')\n", msg.filename);
 				status = do_remove_data_set(msg.filename);
-				if (save_restoreDebug>1) printf("save_restore: remove status=%d (0==success)\n", status);
+				SR_DBG(1,"save_restore: remove status=%d (0==success)\n", status);
 				if (status == 0) {
 				switch (msg.operation) {
 					case op_ReloadPeriodicSet:
@@ -1292,10 +1289,10 @@ disable:
 
 
 			case op_SaveFile:
-				if (save_restoreDebug) printf("save_restore task: manual save('%s')\n", msg.filename);
+				SR_DBG(0,"save_restore task: manual save('%s')\n", msg.filename);
 				num_errs = 0;
 				while (waitForListLock(5) == 0) {
-					if (save_restoreDebug > 1) printf("save_restore: waiting for listLock()\n");
+					SR_DBG(1,"save_restore: waiting for listLock()\n");
 				}
 				status = -1;
 				fullPath[0] = '\0';
@@ -1312,14 +1309,14 @@ disable:
 					/* write the data to disk */
 					if ((plist->not_connected == 0) || (save_restoreIncompleteSetsOk))
 						status = write_save_file(plist, msg.filename, fullPath);
-					if (save_restoreDebug>1) printf("save_restore: op_SaveFile: write_save_file() returned %d\n", status);
+					SR_DBG(1,"save_restore: op_SaveFile: write_save_file() returned %d\n", status);
 				}
 				unlockList();
 				if (status == 0) {
 					status = do_asVerify(fullPath, -1, save_restoreDebug, 0, "");
 				}
 
-				if (save_restoreDebug>1) printf("save_restore: manual save status=%d (0==success)\n", status);
+				SR_DBG(1,"save_restore: manual save status=%d (0==success)\n", status);
 				epicsSnprintf(SR_recentlyStr, STATUS_STR_LEN-1, "Save of '%s' %s",
 								status ? msg.filename : (plist ? plist->save_file : "<null>"),
   								status ? "Failed" : "Succeeded");
@@ -1328,7 +1325,7 @@ disable:
 				break;
 
 			case op_asVerify:
-				if (save_restoreDebug) printf("save_restore task: calling do_asVerify('%s')\n", msg.filename);
+				SR_DBG(1,"save_restore task: calling do_asVerify('%s')\n", msg.filename);
 				if (!isAbsolute(msg.filename)) {
 				    makeNfsPath(fullPath, saveRestoreFilePath, msg.filename);
 				} else {
@@ -1376,8 +1373,7 @@ STATIC int connect_list(struct chlist *plist, int verbose)
 
 	/* connect all channels in the list */
 	for (pchannel = plist->pchan_list, n=0; pchannel != 0; pchannel = pchannel->pnext) {
-		if (save_restoreDebug >= 10)
-			printf("save_restore:connect_list: channel '%s'\n", pchannel->name);
+		SR_DBG(10,"save_restore:connect_list: channel '%s'\n", pchannel->name);
 
 		if (!(pchannel->channel_connected)) {
 			/* printf("The chid of %s is %p\n", pchannel->name, pchannel->chid); */
@@ -1393,7 +1389,7 @@ STATIC int connect_list(struct chlist *plist, int verbose)
 		}
 	}
 	if (ca_pend_io(MAX(5.0, n * 0.01)) == ECA_TIMEOUT) {
-		printf("save_restore:connect_list: not all searches successful\n");
+		SR_ERR("save_restore:connect_list: not all searches successful\n");
 	}
 
 	for (pchannel = plist->pchan_list, n=m=0; pchannel != 0; pchannel = pchannel->pnext) {
@@ -1409,41 +1405,35 @@ STATIC int connect_list(struct chlist *plist, int verbose)
 				strNcpy(pchannel->value,"Connected", STRING_LEN);
 				n++;
 			} else {
-				if (verbose) {
-					printf("save_restore: connect failed for channel '%s'\n", pchannel->name);
-				}
+				SR_VERBOSE("save_restore: connect failed for channel '%s'\n", pchannel->name);
 			}
  		}
 
 		pchannel->max_elements = ca_element_count(pchannel->chid);	/* just to see if it's an array */
 		pchannel->curr_elements = pchannel->max_elements;				/* begin with this assumption */
-		if (save_restoreDebug >= 10)
-			printf("save_restore:connect_list: '%s' has, at most, %ld elements\n",
+		SR_DBG(10,"save_restore:connect_list: '%s' has, at most, %ld elements\n",
 				pchannel->name, pchannel->max_elements);
 		if (pchannel->max_elements > 1) {
 			/* We use database access for arrays, so get that info */
 			status = SR_get_array_info(pchannel->name, &pchannel->max_elements, &field_size, &pchannel->field_type);
 			if (status) {
 				pchannel->curr_elements = pchannel->max_elements = -1;
-				printf("save_restore:connect_list: array PV '%s' is not local.\n", pchannel->name);
+				SR_ERR("save_restore:connect_list: array PV '%s' is not local.\n", pchannel->name);
 			} else {
 				/* info resulting from dbNameToAddr() might be different, but it's still not the actual element count */
 				pchannel->curr_elements = pchannel->max_elements;
-				if (save_restoreDebug >= 10)
-					printf("save_restore:connect_list:(after SR_get_array_info) '%s' has, at most, %ld elements\n",
+				SR_DBG(10,"save_restore:connect_list:(after SR_get_array_info) '%s' has, at most, %ld elements\n",
 						pchannel->name, pchannel->max_elements);
 				pchannel->pArray = calloc(pchannel->max_elements, field_size);
 				if (pchannel->pArray == NULL) {
-					printf("save_restore:connect_list: can't alloc array for '%s'\n", pchannel->name);
+					SR_ERR("save_restore:connect_list: can't alloc array for '%s'\n", pchannel->name);
 					pchannel->curr_elements = pchannel->max_elements = -1;
 				}
 			}
 		}
 	}
 	epicsSnprintf(SR_recentlyStr, STATUS_STR_LEN-1, "%s: %d of %d PV's connected", plist->save_file, n, m);
-	if (verbose) {
-		printf("%s\n", SR_recentlyStr);
-	}
+	SR_VERBOSE("%s\n", SR_recentlyStr);
 
 	return(get_channel_values(plist));
 }
@@ -1499,7 +1489,7 @@ STATIC int enable_list(struct chlist *plist)
 	struct channel	*pchannel;
 	chid 			chid;			/* channel access id */
 
-	if (save_restoreDebug >= 4) printf("save_restore:enable_list: entry\n");
+	SR_DBG(4,"save_restore:enable_list: entry\n");
 	strNcpy(plist->statusStr,"Enabling list...", STATUS_STR_LEN);
 
 	/* enable a periodic set */
@@ -1512,15 +1502,15 @@ STATIC int enable_list(struct chlist *plist)
 	/* enable a triggered set */
 	if ((plist->save_method & TRIGGERED) && !(plist->enabled_method & TRIGGERED)) {
 		if (ca_search(plist->trigger_channel, &chid) != ECA_NORMAL) {
-			printf("save_restore:enable_list: trigger %s search failed\n", plist->trigger_channel);
+			SR_ERR("save_restore:enable_list: trigger %s search failed\n", plist->trigger_channel);
 		} else if (ca_pend_io(2.0) != ECA_NORMAL) {
-			printf("save_restore:enable_list: timeout on search of %s\n", plist->trigger_channel);
+			SR_ERR("save_restore:enable_list: timeout on search of %s\n", plist->trigger_channel);
 		} else if (chid == NULL) {
-			printf("save_restore:enable_list: no CHID for trigger channel '%s'\n", plist->trigger_channel);
+			SR_ERR("save_restore:enable_list: no CHID for trigger channel '%s'\n", plist->trigger_channel);
 		} else if (ca_state(chid) != cs_conn) {
-			printf("save_restore:enable_list: trigger %s search not connected\n", plist->trigger_channel);
+			SR_ERR("save_restore:enable_list: trigger %s search not connected\n", plist->trigger_channel);
 		} else if (ca_add_event(DBR_FLOAT, chid, triggered_save, (void *)plist, 0) !=ECA_NORMAL) {
-			printf("save_restore:enable_list: trigger event for %s failed\n", plist->trigger_channel);
+			SR_ERR("save_restore:enable_list: trigger event for %s failed\n", plist->trigger_channel);
 		} else{
 			plist->enabled_method |= TRIGGERED;
 		}
@@ -1529,10 +1519,8 @@ STATIC int enable_list(struct chlist *plist)
 	/* enable a monitored set */
 	if ((plist->save_method & MONITORED) && !(plist->enabled_method & MONITORED)) {
 		for (pchannel = plist->pchan_list; pchannel != 0; pchannel = pchannel->pnext) {
-			if (save_restoreDebug >= 10) {
-				printf("save_restore:enable_list: calling ca_add_event for '%s'\n", pchannel->name);
-				printf("save_restore:enable_list: arg = %p\n", (void *)plist);
-			}
+			SR_DBG(10,"save_restore:enable_list: calling ca_add_event for '%s'\n", pchannel->name);
+			SR_DBG(10,"save_restore:enable_list: arg = %p\n", (void *)plist);
 			/*
 			 * Work around obscure problem affecting USHORTS by making DBR type different
 			 * from any possible field type.  This avoids tickling a bug that causes dbGet
@@ -1541,13 +1529,13 @@ STATIC int enable_list(struct chlist *plist)
 			 */
 			if (ca_add_event(DBR_TIME_LONG, pchannel->chid, on_change_save,
 					(void *)plist, 0) != ECA_NORMAL) {
-				printf("save_restore:enable_list: could not add event for %s in %s\n",
+				SR_ERR("save_restore:enable_list: could not add event for %s in %s\n",
 					pchannel->name,plist->reqFile);
 			}
 		}
-		if (save_restoreDebug >= 4) printf("save_restore:enable_list: done calling ca_add_event for list channels\n");
+		SR_DBG(4,"save_restore:enable_list: done calling ca_add_event for list channels\n");
 		if (ca_pend_io(5.0) != ECA_NORMAL) {
-			printf("save_restore:enable_list: timeout on monitored set: %s to monitored scan\n",plist->reqFile);
+			SR_ERR("save_restore:enable_list: timeout on monitored set: %s to monitored scan\n",plist->reqFile);
 		}
 		callbackRequestDelayed(&plist->monitorCb, (double)plist->monitor_period);
 		plist->enabled_method |= MONITORED;
@@ -1593,16 +1581,15 @@ STATIC int get_channel_values(struct chlist *plist)
 				status = SR_get_array_info(pchannel->name, &pchannel->max_elements, &field_size, &pchannel->field_type);
 				if (status) {
 					pchannel->curr_elements = pchannel->max_elements = -1; /* Mark channel so we ignore it forever. */
-					printf("save_restore:get_channel_values: array PV '%s' is not local.\n", pchannel->name);
+					SR_ERR("save_restore:get_channel_values: array PV '%s' is not local.\n", pchannel->name);
 				} else {
 					/* info resulting from dbNameToAddr() might be different, but it's still not the actual element count */
 					pchannel->curr_elements = pchannel->max_elements;
-					if (save_restoreDebug >= 10)
-						printf("save_restore:get_channel_values:(after SR_get_array_info) '%s' has, at most, %ld elements\n",
-							pchannel->name, pchannel->max_elements);
+					SR_DBG(10,"save_restore:get_channel_values:(after SR_get_array_info) '%s' has, at most, %ld elements\n",
+						pchannel->name, pchannel->max_elements);
 					pchannel->pArray = calloc(pchannel->max_elements, field_size);
 					if (pchannel->pArray == NULL) {
-						printf("save_restore:get_channel_values: can't alloc array for '%s'\n", pchannel->name);
+						SR_ERR("save_restore:get_channel_values: can't alloc array for '%s'\n", pchannel->name);
 						pchannel->curr_elements = pchannel->max_elements = -1; /* Mark channel so we ignore it forever. */
 					}
 				}
@@ -1629,28 +1616,26 @@ STATIC int get_channel_values(struct chlist *plist)
 				pchannel->curr_elements = pchannel->max_elements;
 				(void)SR_get_array(pchannel->name, pchannel->pArray, &pchannel->curr_elements);
 			}
-			if (save_restoreDebug >= 15) {
-				printf("save_restore:get_channel_values: '%s' currently has %ld elements\n",
-					pchannel->name, pchannel->curr_elements);
-			}
+			SR_DBG(15,"save_restore:get_channel_values: '%s' currently has %ld elements\n",
+				pchannel->name, pchannel->curr_elements);
 		} else {
 			not_connected++;
 			if (pchannel->chid == NULL) {
-				if (save_restoreDebug > 1) printf("save_restore:get_channel_values: no CHID for '%s'\n", pchannel->name);
+				SR_DBG(1,"save_restore:get_channel_values: no CHID for '%s'\n", pchannel->name);
 			} else if (ca_state(pchannel->chid) != cs_conn) {
-				if (save_restoreDebug > 1) printf("save_restore:get_channel_values: %s not connected\n", pchannel->name);
+				SR_DBG(1,"save_restore:get_channel_values: %s not connected\n", pchannel->name);
 			} else if (pchannel->max_elements == 0) {
-				if (save_restoreDebug > 1) printf("save_restore:get_channel_values: %s has an undetermined # elements\n",
+				SR_DBG(1,"save_restore:get_channel_values: %s has an undetermined # elements\n",
 					pchannel->name);
 			} else if (pchannel->max_elements == -1) {
-				if (save_restoreDebug > 1) printf("save_restore:get_channel_values: %s has a serious problem\n",
+				SR_DBG(1,"save_restore:get_channel_values: %s has a serious problem\n",
 					pchannel->name);
 			}
 
 		}
 	}
 	if (ca_pend_io(MIN(10.0, .1*num_channels)) != ECA_NORMAL) {
-		printf("save_restore:get_channel_values: not all gets completed");
+		SR_ERR("save_restore:get_channel_values: not all gets completed");
 		not_connected++;
 	}
 
@@ -1667,7 +1652,7 @@ STATIC int get_channel_values(struct chlist *plist)
 			/* then we at least had a CA connection.  Did it produce? */
 			pchannel->valid = strcmp(pchannel->value, INIT_STRING);
 		} else {
-			if (save_restoreDebug > 1) printf("save_restore:get_channel_values: invalid channel %s\n", pchannel->name);
+			SR_DBG(1,"save_restore:get_channel_values: invalid channel %s\n", pchannel->name);
 		}
 	}
 
@@ -1688,18 +1673,18 @@ STATIC int check_file(char *file)
 
 	if ((fd = fopen(file, "r")) != NULL) {
 		if (fseek(fd, -7, SEEK_END)) {
-			printf("save_restore:check_file: seek failed\n");
+			SR_ERR("save_restore:check_file: seek failed\n");
 			file_state = BS_BAD;
 			fclose(fd);
 			return(file_state);
 		}
 		if (fgets(tmpstr, 7, fd) == 0) {
-			printf("save_restore:check_file: fgets failed\n");
+			SR_ERR("save_restore:check_file: fgets failed\n");
 			file_state = BS_BAD;
 			fclose(fd);
 			return(file_state);
 		}
-		if (save_restoreDebug >= 5) printf("save_restore:check_file: tmpstr='%s'\n", tmpstr);
+		SR_DBG(5,"save_restore:check_file: tmpstr='%s'\n", tmpstr);
 		if (strncmp(tmpstr, "<END>", 5) == 0) {
 			file_state = BS_OK;
 			fclose(fd);
@@ -1707,18 +1692,18 @@ STATIC int check_file(char *file)
 		}
 
 		if (fseek(fd, -6, SEEK_END)) {
-			printf("save_restore:check_file: seek failed\n");
+			SR_ERR("save_restore:check_file: seek failed\n");
 			file_state = BS_BAD;
 			fclose(fd);
 			return(file_state);
 		}
 		if (fgets(tmpstr, 6, fd) == 0) {
-			printf("save_restore:check_file: fgets failed\n");
+			SR_ERR("save_restore:check_file: fgets failed\n");
 			file_state = BS_BAD;
 			fclose(fd);
 			return(file_state);
 		}
-		if (save_restoreDebug >= 5) printf("save_restore:check_file: tmpstr='%s'\n", tmpstr);
+		SR_DBG(5,"save_restore:check_file: tmpstr='%s'\n", tmpstr);
 		if (strncmp(tmpstr, "<END>", 5) == 0) {
 			file_state = BS_OK;
 			fclose(fd);
@@ -1765,7 +1750,7 @@ void print_chmod_error(int errNumber)
                         strcpy(longMessage, "A function was passed incorrect argument values, or an operation was attempted on an object and the operation specified is not supported for that type of object.");
         }
 
-        printf("Error %d - %s\n%s\n", errNumber, shortMessage, longMessage);
+        SR_ERR("Error %d - %s\n%s\n", errNumber, shortMessage, longMessage);
 }
 
 
@@ -1799,7 +1784,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 	/* Note: must truncate, else file retains old characters when its used length decreases. */
 	filedes = open(filename, O_RDWR | O_CREAT | O_TRUNC, file_permissions);
 	if (filedes < 0) {
-		printf("save_restore:write_it - unable to open file '%s' [%s]\n",
+		SR_ERR("save_restore:write_it - unable to open file '%s' [%s]\n",
 			filename, datetime);
 		if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 		if (++save_restoreIoErrors > save_restoreRemountThreshold) {
@@ -1814,7 +1799,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 			status = fchmod (filedes, (mode_t) file_permissions);
 			if (status) {
 				int err = errno;
-				printf("write_it - when changing %s file permission:\n", filename);
+				SR_ERR("write_it - when changing %s file permission:\n", filename);
 				print_chmod_error(err);
 			}
 		}
@@ -1822,7 +1807,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 	}
 #else
 	if ((out_fd = fopen(filename,"w")) == NULL) {
-		printf("save_restore:write_it - unable to open file '%s' [%s]\n",
+		SR_ERR("save_restore:write_it - unable to open file '%s' [%s]\n",
 			filename, datetime);
 		if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 		if (++save_restoreIoErrors > save_restoreRemountThreshold) {
@@ -1839,7 +1824,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 	n = fprintf(out_fd,"# %s\tAutomatically generated - DO NOT MODIFY - %s\n",
 			SRversion, datetime);
 	if (n <= 0) {
-		printf("save_restore:write_it: fprintf returned %d. [%s]\n", n, datetime);
+		SR_ERR("save_restore:write_it: fprintf returned %d. [%s]\n", n, datetime);
 		if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 		problem |= FPRINTF_FAILED;
 		goto trouble;
@@ -1850,7 +1835,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 		n = fprintf(out_fd,"! %d channel(s) not connected - or not all gets were successful\n",
 				plist->not_connected);
 		if (n <= 0) {
-			printf("save_restore:write_it: fprintf returned %d. [%s]\n", n, datetime);
+			SR_ERR("save_restore:write_it: fprintf returned %d. [%s]\n", n, datetime);
 			if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 			problem |= FPRINTF_FAILED;
 			goto trouble;
@@ -1872,7 +1857,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 			n = fprintf(out_fd, "#%s ", pchannel->name);
 		}
 		if (n <= 0) {
-			printf("save_restore:write_it: fprintf returned %d. [%s]\n", n, datetime);
+			SR_ERR("save_restore:write_it: fprintf returned %d. [%s]\n", n, datetime);
 			if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 			problem |= FPRINTF_FAILED;
 			goto trouble;
@@ -1902,7 +1887,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 			n = SR_write_array_data(out_fd, pchannel->name, (void *)pchannel->pArray, pchannel->curr_elements);
 		}
 		if (n <= 0) {
-			printf("save_restore:write_it: fprintf returned %d [%s].\n", n, datetime);
+			SR_ERR("save_restore:write_it: fprintf returned %d [%s].\n", n, datetime);
 			if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 			problem |= FPRINTF_FAILED;
 			goto trouble;
@@ -1921,7 +1906,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 	errno = 0;
 	n = fprintf(out_fd, "<END>\n");
 	if (n <= 0) {
-		printf("save_restore:write_it: fprintf returned %d. [%s]\n", n, datetime);
+		SR_ERR("save_restore:write_it: fprintf returned %d. [%s]\n", n, datetime);
 		if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 		problem |= FPRINTF_FAILED;
 		goto trouble;
@@ -1931,7 +1916,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 	errno = 0;
 	n = fflush(out_fd);
 	if (n) {
-		printf("save_restore:write_it: fflush returned %d [%s]\n", n, datetime);
+		SR_ERR("save_restore:write_it: fflush returned %d [%s]\n", n, datetime);
 		if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 	}
 
@@ -1940,7 +1925,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 #if defined(vxWorks)
 	n = ioctl(fileno(out_fd),FIOSYNC,0);	/* NFS flush to disk */
 	if (n == ERROR) {
-		printf("save_restore:write_it: ioctl(,FIOSYNC,) returned %d [%s]\n",
+		SR_ERR("save_restore:write_it: ioctl(,FIOSYNC,) returned %d [%s]\n",
 			n, datetime);
 		if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 	}
@@ -1953,7 +1938,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 	if (n && ((errno == EINVAL) || (errno == EROFS)) ) { n = 0; errno = 0; }
 #endif
 	if (n) {
-		printf("save_restore:write_it: fsync returned %d [%s]\n", n, datetime);
+		SR_ERR("save_restore:write_it: fsync returned %d [%s]\n", n, datetime);
 		if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 	}
 #endif
@@ -1963,7 +1948,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 	n = fclose(out_fd);
 	out_fd = NULL;
 	if (n) {
-		printf("save_restore:write_it: fclose returned %d [%s]\n", n, datetime);
+		SR_ERR("save_restore:write_it: fclose returned %d [%s]\n", n, datetime);
 		if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 		problem |= CLOSE_FAILED;
 		goto trouble;
@@ -1972,21 +1957,21 @@ STATIC int write_it(char *filename, struct chlist *plist)
 	/* qiao: check the file state: the file contents, file size and the save time of the file */
     file_check = check_file(filename);
 	if (file_check != BS_OK) {
-		printf("save_restore:write_it: file-check failure [%s], check_file=%d\n",
+		SR_ERR("save_restore:write_it: file-check failure [%s], check_file=%d\n",
             datetime, file_check);
 		return(ERROR);
 	}
 
 	stat(filename, &fileStat);
 	if (fileStat.st_size <= 0) {
-		printf("save_restore:write_it: unphysical file size [%s], size=%lld\n",
+		SR_ERR("save_restore:write_it: unphysical file size [%s], size=%lld\n",
             datetime, (long long)fileStat.st_size);
 		return(ERROR);
 	}
 
     delta_time = difftime(time(NULL), fileStat.st_mtime);
 	if (delta_time > 10.0) {
-		printf("save_restore:write_it: file time is different from IOC time [%s], difference=%fs\n",
+		SR_ERR("save_restore:write_it: file time is different from IOC time [%s], difference=%fs\n",
             datetime, delta_time);
 		return(ERROR);
 	}
@@ -2005,7 +1990,7 @@ trouble:
 		n = fclose(out_fd);
 		out_fd = NULL;
 		if (n) {
-			printf("save_restore:write_it: fclose('%s') returned %d\n", plist->save_file, n);
+			SR_ERR("save_restore:write_it: fclose('%s') returned %d\n", plist->save_file, n);
 			if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
 		} else {
 			problem &= ~CLOSE_FAILED;
@@ -2013,7 +1998,7 @@ trouble:
 	}
 	if (problem) {
 		fGetDateStr(datetime);
-		printf("save_restore:write_it: Giving up on this attempt to write '%s'. [%s]\n",
+		SR_ERR("save_restore:write_it: Giving up on this attempt to write '%s'. [%s]\n",
 			plist->save_file, datetime);
 	}
 
@@ -2079,7 +2064,7 @@ STATIC int write_save_file(struct chlist *plist, const char *configName, char *r
 		/* Ensure that backup is ok before we overwrite .sav file. */
 		backup_state = check_file(backup_file);
 		if (backup_state != BS_OK) {
-			printf("save_restore:write_save_file: Backup file (%s) bad or not found.  Writing a new one. [%s]\n",
+			SR_VERBOSE("save_restore:write_save_file: Backup file (%s) bad or not found.  Writing a new one. [%s]\n",
 				backup_file, datetime);
 			if (backup_state == BS_BAD) {
 				/* make a backup copy of the corrupted file */
@@ -2092,9 +2077,9 @@ STATIC int write_save_file(struct chlist *plist, const char *configName, char *r
 				(void)myFileCopy(backup_file, tmpstr);
 			}
 			if (write_it(backup_file, plist) == ERROR) {
-				printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
-				printf("save_restore:write_save_file: Can't write new backup file. [%s]\n", datetime);
-				printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
+				//printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
+				SR_ERR("save_restore:write_save_file: Can't write new backup file. [%s]\n", datetime);
+				//printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
 				plist->status = SR_STATUS_FAIL;
 				strNcpy(plist->statusStr, "Can't write .savB file", STATUS_STR_LEN);
 				TRY_TO_PUT_AND_FLUSH(DBR_STRING, plist->statusStr_chid, &plist->statusStr);
@@ -2122,11 +2107,11 @@ STATIC int write_save_file(struct chlist *plist, const char *configName, char *r
 	}
 
 	/*** Write the save file ***/
-	if (save_restoreDebug > 2) printf("write_save_file: saving to %s\n", save_file);
+	SR_DBG(2,"write_save_file: saving to %s\n", save_file);
 	if (write_it(save_file, plist) == ERROR) {
-		printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
-		printf("save_restore:write_save_file: Can't write save file. [%s]\n", datetime);
-		printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
+		//printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
+		SR_ERR("save_restore:write_save_file: Can't write save file. [%s]\n", datetime);
+		//printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
 		plist->status = SR_STATUS_FAIL;
 		strNcpy(plist->statusStr, "Can't write .sav file", STATUS_STR_LEN);
 		TRY_TO_PUT_AND_FLUSH(DBR_STRING, plist->statusStr_chid, &plist->statusStr);
@@ -2143,7 +2128,7 @@ STATIC int write_save_file(struct chlist *plist, const char *configName, char *r
 		if (backup_state != BS_NEW) {
 			/* make a backup copy */
 			if (myFileCopy(save_file, backup_file) != OK) {
-				printf("save_restore:write_save_file - Couldn't make backup '%s' [%s]\n",
+				SR_ERR("save_restore:write_save_file - Couldn't make backup '%s' [%s]\n",
 					backup_file, datetime);
 				plist->status = SR_STATUS_WARN;
 				strNcpy(plist->statusStr, "Can't copy .sav to .savB file", STATUS_STR_LEN);
@@ -2212,16 +2197,16 @@ STATIC void do_seq(struct chlist *plist)
 	}
 
 	if (check_file(save_file) == BS_NONE) {
-		printf("save_restore:do_seq - '%s' not found.  Writing a new one. [%s]\n",
+		SR_VERBOSE("save_restore:do_seq - '%s' not found.  Writing a new one. [%s]\n",
 			save_file, datetime);
 		(void) write_save_file(plist, NULL, NULL);
 	}
 	epicsSnprintf(p, NFS_PATH_LEN-1-strlen(backup_file), "%1d", plist->backup_sequence_num);
 	if (myFileCopy(save_file, backup_file) != OK) {
-		printf("save_restore:do_seq - Can't copy save file to '%s' [%s]\n",
+		SR_ERR("save_restore:do_seq - Can't copy save file to '%s' [%s]\n",
 			backup_file, datetime);
 		if (write_it(backup_file, plist) == ERROR) {
-			printf("save_restore:do_seq - Can't write seq. file from PV list. [%s]\n", datetime);
+			SR_ERR("save_restore:do_seq - Can't write seq. file from PV list. [%s]\n", datetime);
 			if (plist->status >= SR_STATUS_WARN) {
 				plist->status = SR_STATUS_SEQ_WARN;
 				strNcpy(plist->statusStr, "Can't write sequence file", STATUS_STR_LEN);
@@ -2230,7 +2215,7 @@ STATIC void do_seq(struct chlist *plist)
 				plist->save_file, plist->backup_sequence_num);
 			return;
 		} else {
-			printf("save_restore:do_seq: Wrote seq. file from PV list. [%s]\n", datetime);
+			SR_VERBOSE("save_restore:do_seq: Wrote seq. file from PV list. [%s]\n", datetime);
 			epicsSnprintf(SR_recentlyStr, STATUS_STR_LEN-1, "Wrote '%s%1d'",
 				plist->save_file, plist->backup_sequence_num);
 		}
@@ -2249,9 +2234,7 @@ STATIC void doPeriodicDatedBackup(struct chlist *plist) {
 	char	tmpstr[TMPSTRLEN];
 	char	datetime[32];
 
-	if (save_restoreDebug > 1) {
-		printf("save_restore:doPeriodicDatedBackup: entry\n");
-	}
+	SR_DBG(1,"save_restore:doPeriodicDatedBackup: entry\n");
 
 	fGetDateStr(datetime);
 	/* Make full file names */
@@ -2282,13 +2265,12 @@ STATIC void doPeriodicDatedBackup(struct chlist *plist) {
 
 	strncat(save_file, "_b_", sizeof(save_file)-strlen(save_file)-1);
 	strncat(save_file, datetime, sizeof(save_file)-strlen(save_file)-1);
-	if (save_restoreDebug > 1) {
-		printf("save_restore:doPeriodicDatedBackup: filename is '%s'\n", save_file);
-	}
+	
+	SR_DBG(1,"save_restore:doPeriodicDatedBackup: filename is '%s'\n", save_file);
 	if (write_it(save_file, plist) == ERROR) {
-		printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
-		printf("save_restore:doPeriodicDatedBackup: Can't write file. [%s]\n", save_file);
-		printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
+		//printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
+		SR_ERR("save_restore:doPeriodicDatedBackup: Can't write file. [%s]\n", save_file);
+		//printf("*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n");
 	}
 }
 
@@ -2298,7 +2280,7 @@ int set_savefile_name(char *filename, char *save_filename)
 	struct chlist	*plist;
 
 	if (waitForListLock(5) == 0) {
-		printf("set_savefile_name:failed to lock resource.  Try later.\n");
+		SR_ERR("set_savefile_name:failed to lock resource.  Try later.\n");
 		return(ERROR);
 	}
 	plist = lptr;
@@ -2311,7 +2293,7 @@ int set_savefile_name(char *filename, char *save_filename)
 		}
 		plist = plist->pnext;
 	}
-	printf("save_restore:set_savefile_name: No save set enabled for %s\n",filename);
+	SR_ERR("save_restore:set_savefile_name: No save set enabled for %s\n",filename);
 	unlockList();
 	return(ERROR);
 }
@@ -2329,7 +2311,7 @@ int create_triggered_set(char *filename, char *trigger_channel, char *macrostrin
 		return(create_data_set(filename, TRIGGERED, 0, trigger_channel, 0, macrostring));
 	}
 	else {
-		printf("save_restore:create_triggered_set: Error: trigger-channel name is required.\n");
+		SR_ERR("save_restore:create_triggered_set: Error: trigger-channel name is required.\n");
 		return(ERROR);
 	}
 }
@@ -2363,27 +2345,25 @@ STATIC int create_data_set(
 	int				inx;			/* i/o status 	       */
 	int i;
 
-	if (save_restoreDebug > 1) {
-		printf("save_restore:create_data_set: file '%s', method %x, period %d, trig_chan '%s', mon_period %d\n",
-			filename, save_method, period, trigger_channel ? trigger_channel : "NONE", mon_period);
-	}
+	SR_DBG(1,"save_restore:create_data_set: file '%s', method %x, period %d, trig_chan '%s', mon_period %d\n",
+		filename, save_method, period, trigger_channel ? trigger_channel : "NONE", mon_period);
 
 	/* initialize save_restore routines */
 	if (!save_restore_init) {
 		if ((sr_mutex = epicsMutexCreate()) == 0) {
-			printf("save_restore:create_data_set: could not create list header mutex");
+			SR_ERR("save_restore:create_data_set: could not create list header mutex");
 			return(ERROR);
 		}
 		opMsgQueue = epicsMessageQueueCreate(OP_MSG_QUEUE_SIZE, OP_MSG_SIZE);
 		if (opMsgQueue == NULL) {
-			printf("save_restore:create_data_set: could not create message queue");
+			SR_ERR("save_restore:create_data_set: could not create message queue");
 			return(ERROR);
 		}
 		taskID = epicsThreadCreate("save_restore", taskPriority,
 			epicsThreadGetStackSize(epicsThreadStackBig),
 			(EPICSTHREADFUNC)save_restore, 0);
 		if (taskID == NULL) {
-			printf("save_restore:create_data_set: could not create save_restore task");
+			SR_ERR("save_restore:create_data_set: could not create save_restore task");
 			return(ERROR);
 		}
 		save_restore_init = 1;
@@ -2401,13 +2381,13 @@ STATIC int create_data_set(
 
 	/* is save set defined - add new save mode if necessary */
 	while (waitForListLock(5) == 0) {
-		if (save_restoreDebug > 1) printf("create_data_set: '%s' waiting for listLock()\n", filename);
+		SR_DBG(1,"create_data_set: '%s' waiting for listLock()\n", filename);
 	}
 	plist = lptr;
 	while (plist != 0) {
 		if (!strcmp(plist->reqFile,filename)) {
 			if (plist->save_method & save_method) {
-				printf("save_restore:create_data_set: '%s' already in %x mode",filename,save_method);
+				SR_ERR("save_restore:create_data_set: '%s' already in %x mode",filename,save_method);
 				unlockList();
 				return(ERROR);
 			} else {
@@ -2416,7 +2396,7 @@ STATIC int create_data_set(
 					if (trigger_channel) {
 						strNcpy(plist->trigger_channel,trigger_channel, PV_NAME_LEN);
 					} else {
-						printf("save_restore:create_data_set: no trigger channel");
+						SR_ERR("save_restore:create_data_set: no trigger channel");
 						unlockList();
 						return(ERROR);
 					}
@@ -2443,7 +2423,7 @@ STATIC int create_data_set(
 
 	/* create a new channel list */
 	if ((plist = (struct chlist *)calloc(1,sizeof (struct chlist))) == (struct chlist *)0) {
-		printf("save_restore:create_data_set: channel list calloc failed");
+		SR_ERR("save_restore:create_data_set: channel list calloc failed");
 		return(ERROR);
 	}
 	if (macrostring && (strlen(macrostring)>0)) {
@@ -2512,7 +2492,7 @@ STATIC int create_data_set(
 
 	/* link it to the save set list */
 	while (waitForListLock(5) == 0) {
-		if (save_restoreDebug > 1) printf("create_data_set: '%s' waiting for listLock()\n", filename);
+		SR_DBG(1,"create_data_set: '%s' waiting for listLock()\n", filename);
 	}
 	plist->pnext = lptr;
 	lptr = plist;
@@ -2638,7 +2618,7 @@ int set_requestfile_path(char *path, char *pathsub)
 	if (path && *path) path_len = strlen(path);
 	if (pathsub && *pathsub) pathsub_len = strlen(pathsub);
 	if (path_len + pathsub_len > (NFS_PATH_LEN-1)) {	/* may have to add '/' */
-		printf("save_restore:set_requestfile_path: 'path'+'pathsub' is too long\n");
+		SR_ERR("save_restore:set_requestfile_path: 'path'+'pathsub' is too long\n");
 		return(ERROR);
 	}
 
@@ -2648,7 +2628,7 @@ int set_requestfile_path(char *path, char *pathsub)
 		/* return(set_requestfile_path(fullpath)); */
 		pnew = (struct pathListElement *)calloc(1, sizeof(struct pathListElement));
 		if (pnew == NULL) {
-			printf("save_restore:set_requestfile_path: calloc failed\n");
+			SR_ERR("save_restore:set_requestfile_path: calloc failed\n");
 			return(ERROR);
 		}
 
@@ -2688,11 +2668,11 @@ int set_savefile_path(char *path, char *pathsub)
 		}
 		if (save_restoreNFSHostName[0] && save_restoreNFSHostAddr[0] && save_restoreNFSMntPoint[0]) {
 			if (mountFileSystem(save_restoreNFSHostName, save_restoreNFSHostAddr, save_restoreNFSMntPoint, save_restoreNFSMntPoint) == OK) {
-				printf("save_restore:mountFileSystem:successfully mounted '%s'\n", save_restoreNFSMntPoint);
+				SR_VERBOSE("save_restore:mountFileSystem:successfully mounted '%s'\n", save_restoreNFSMntPoint);
 				strNcpy(SR_recentlyStr, "mountFileSystem succeeded", STATUS_STR_LEN);
 			}
 			else {
-				printf("save_restore: Can't mount '%s'\n", save_restoreNFSMntPoint);
+				SR_ERR("save_restore: Can't mount '%s'\n", save_restoreNFSMntPoint);
 			}
 		}
 		return(OK);
@@ -2721,7 +2701,7 @@ STATIC int remove_data_set(char *filename)
 
 	msg.operation = op_Remove;
 	if ((filename == NULL) || (strlen(filename)<1) || (strlen(filename)>=OP_MSG_FILENAME_SIZE-1)) {
-		printf("remove_data_set: bad filename\n");
+		SR_ERR("remove_data_set: bad filename\n");
 		return(-1);
 	}
 	strNcpy(msg.filename, filename, OP_MSG_FILENAME_SIZE);
@@ -2739,7 +2719,7 @@ STATIC int do_remove_data_set(char *filename)
 
 	/* find the data set */
 	if (waitForListLock(5) == 0) {
-		printf("do_remove_data_set:failed to lock resource.  Try later.\n");
+		SR_ERR("do_remove_data_set:failed to lock resource.  Try later.\n");
 		return(ERROR);
 	}
 	plist = lptr;
@@ -2756,7 +2736,7 @@ STATIC int do_remove_data_set(char *filename)
 
 	if (found) {
 		if (waitForListLock(5) == 0) {
-			printf("do_remove_data_set:failed to lock resource.  Try later.\n");
+			SR_ERR("do_remove_data_set:failed to lock resource.  Try later.\n");
 			return(ERROR);
 		}
 		if (plist->macrostring) free(plist->macrostring);
@@ -2764,13 +2744,13 @@ STATIC int do_remove_data_set(char *filename)
 		pchannel = plist->pchan_list;
 		while (pchannel) {
 			if (ca_clear_channel(pchannel->chid) != ECA_NORMAL) {
-				printf("save_restore:do_remove_data_set: couldn't remove ca connection for %s\n", pchannel->name);
+				SR_ERR("save_restore:do_remove_data_set: couldn't remove ca connection for %s\n", pchannel->name);
 			}
 			pchannel = pchannel->pnext;
 			numchannels++;
 		}
 		if (ca_pend_io(MIN(10.0, numchannels*0.1)) != ECA_NORMAL) {
-		       printf("save_restore:do_remove_data_set: ca_pend_io() timed out\n");
+		       SR_ERR("save_restore:do_remove_data_set: ca_pend_io() timed out\n");
 		}
 		pchannel = plist->pchan_list;
 		while (pchannel) {
@@ -2789,7 +2769,7 @@ STATIC int do_remove_data_set(char *filename)
 		unlockList();
 
 	} else {
-		printf("save_restore:do_remove_data_set: Couldn't find '%s'\n", filename);
+		SR_ERR("save_restore:do_remove_data_set: Couldn't find '%s'\n", filename);
 		epicsSnprintf(SR_recentlyStr, STATUS_STR_LEN-1, "Can't remove data set '%s'", filename);
 		return(ERROR);
 	}
@@ -2804,12 +2784,12 @@ int reload_periodic_set(char *filename, int period, char *macrostring)
 	msg.operation = op_ReloadPeriodicSet;
 	msg.period = period;
 	if ((filename == NULL) || (strlen(filename)<1) || (strlen(filename)>=OP_MSG_FILENAME_SIZE-1)) {
-		printf("reload_periodic_set: bad filename\n");
+		SR_ERR("reload_periodic_set: bad filename\n");
 		return(-1);
 	}
 	strNcpy(msg.filename, filename, OP_MSG_FILENAME_SIZE);
 	if (strlen(macrostring) > (OP_MSG_MACRO_SIZE-1)) {
-		printf("macro string '%s' is too long for message queue\n", macrostring);
+		SR_ERR("macro string '%s' is too long for message queue\n", macrostring);
 		return(-1);
 	}
 	strNcpy(msg.macrostring, macrostring, OP_MSG_MACRO_SIZE);
@@ -2823,12 +2803,12 @@ int reload_triggered_set(char *filename, char *trigger_channel, char *macrostrin
 
 	msg.operation = op_ReloadTriggeredSet;
 	if ((filename == NULL) || (strlen(filename)<1) || (strlen(filename)>=OP_MSG_FILENAME_SIZE-1)) {
-		printf("reload_triggered_set: bad filename\n");
+		SR_ERR("reload_triggered_set: bad filename\n");
 		return(-1);
 	}
 	strNcpy(msg.filename, filename, OP_MSG_FILENAME_SIZE);
 	if (strlen(macrostring) > (OP_MSG_MACRO_SIZE-1)) {
-		printf("macro string '%s' is too long for message queue\n", macrostring);
+		SR_ERR("macro string '%s' is too long for message queue\n", macrostring);
 		return(-1);
 	}
 	strNcpy(msg.macrostring, macrostring, OP_MSG_MACRO_SIZE);
@@ -2845,12 +2825,12 @@ int reload_monitor_set(char * filename, int period, char *macrostring)
 	msg.operation = op_ReloadMonitorSet;
 	msg.period = period;
 	if ((filename == NULL) || (strlen(filename)<1) || (strlen(filename)>=OP_MSG_FILENAME_SIZE-1)) {
-		printf("reload_monitor_set: bad filename\n");
+		SR_ERR("reload_monitor_set: bad filename\n");
 		return(-1);
 	}
 	strNcpy(msg.filename, filename, OP_MSG_FILENAME_SIZE);
 	if (strlen(macrostring) > (OP_MSG_MACRO_SIZE-1)) {
-		printf("macro string '%s' is too long for message queue\n", macrostring);
+		SR_ERR("macro string '%s' is too long for message queue\n", macrostring);
 		return(-1);
 	}
 	strNcpy(msg.macrostring, macrostring, OP_MSG_MACRO_SIZE);
@@ -2864,12 +2844,12 @@ int reload_manual_set(char * filename, char *macrostring)
 	
 	msg.operation = op_ReloadManualSet;
 	if ((filename == NULL) || (strlen(filename)<1) || (strlen(filename)>=OP_MSG_FILENAME_SIZE-1)) {
-		printf("reload_manual_set: bad filename\n");
+		SR_ERR("reload_manual_set: bad filename\n");
 		return(-1);
 	}
 	strNcpy(msg.filename, filename, OP_MSG_FILENAME_SIZE);
 	if (strlen(macrostring) > (OP_MSG_MACRO_SIZE-1)) {
-		printf("macro string '%s' is too long for message queue\n", macrostring);
+		SR_ERR("macro string '%s' is too long for message queue\n", macrostring);
 		return(-1);
 	}
 	strNcpy(msg.macrostring, macrostring, OP_MSG_MACRO_SIZE);
@@ -2879,7 +2859,7 @@ int reload_manual_set(char * filename, char *macrostring)
 
 int fdbrestore(char *filename)
 {
-	printf("save_restore:fdbrestore:entry\n");
+	SR_ERR("save_restore:fdbrestore:entry\n");
 	return(request_manual_restore(filename, FROM_SAVE_FILE, NULL, NULL, NULL));
 }
 
@@ -2889,24 +2869,22 @@ int fdbrestoreX(char *filename, char *macrostring, callbackFunc callbackFunction
 }
 
 STATIC void defaultCallback(int status, void *puserPvt) {
-	printf("save_restore:defaultCallback:status=%d\n", status);
+	SR_ERR("save_restore:defaultCallback:status=%d\n", status);
 }
 
 STATIC int request_manual_restore(char *filename, int file_type, char *macrostring, callbackFunc callbackFunction, void *puserPvt)
 {
 	op_msg msg;
 
-	if (save_restoreDebug >= 5) {
-		printf("save_restore:request_manual_restore: entry\n");
-	}
+	SR_DBG(5,"save_restore:request_manual_restore: entry\n");
 	msg.operation = (file_type==FROM_SAVE_FILE) ? op_RestoreFromSaveFile : op_RestoreFromAsciiFile;
 	if ((filename == NULL) || (strlen(filename)<1) || (strlen(filename)>=OP_MSG_FILENAME_SIZE-1)) {
-		printf("request_manual_restore: bad filename\n");
+		SR_ERR("request_manual_restore: bad filename\n");
 		return(-1);
 	}
 	strNcpy(msg.filename, filename, OP_MSG_FILENAME_SIZE);
 	if ((macrostring) && (strlen(macrostring) > (OP_MSG_MACRO_SIZE-1))) {
-		printf("request_manual_restore: macro string '%s' is too long for message queue\n", macrostring);
+		SR_ERR("request_manual_restore: macro string '%s' is too long for message queue\n", macrostring);
 		return(-1);
 	}
 	if ((macrostring) && (strlen(macrostring)>0)) {
@@ -2928,12 +2906,11 @@ STATIC int request_asVerify(char *filename, int verbose, char *restoreFileName)
 {
 	op_msg msg;
 
-	if (save_restoreDebug >= 5) {
-		printf("save_restore:request_asVerify: entry\n");
-	}
+	SR_DBG(5,"save_restore:request_asVerify: entry\n");
+
 	msg.operation = op_asVerify;
 	if ((filename == NULL) || (strlen(filename)<1) || (strlen(filename)>=OP_MSG_FILENAME_SIZE-1)) {
-		printf("request_asVerify: bad filename\n");
+		SR_ERR("request_asVerify: bad filename\n");
 		return(-1);
 	}
 	strNcpy(msg.filename, filename, OP_MSG_FILENAME_SIZE);
@@ -3000,9 +2977,7 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 	double			*p_double = NULL;
 
 
-	if (save_restoreDebug >= 1) {
-		printf("save_restore:manual_array_restore:entry: PV = '%s'\n", PVname);
-	}
+	SR_DBG(1,"save_restore:manual_array_restore:entry: PV = '%s'\n", PVname);
 
 	if (!gobble) {
 		/*** set up infrastructure for collecting array elements from file into local array ***/
@@ -3011,9 +2986,7 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 		field_size = dbr_size[field_type];
 		/* if we've already allocated a big enough memory block, use it */
 		if ((p_data == NULL) || ((max_elements * field_size) > p_data_size)) {
-			if (save_restoreDebug >= 1) {
-				printf("save_restore:manual_array_restore: p_data = %p, p_data_size = %ld\n", p_data, p_data_size);
-			}
+			SR_DBG(1,"save_restore:manual_array_restore: p_data = %p, p_data_size = %ld\n", p_data, p_data_size);
 			if (p_data) free(p_data);
 			p_data = (void *)calloc(max_elements, field_size);
 			p_data_size = p_data ? max_elements * field_size : 0;
@@ -3021,10 +2994,8 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 		} else {
 			memset(p_data, 0, p_data_size);
 		}
-		if (save_restoreDebug >= 10) {
-			printf("save_restore:manual_array_restore: Looking for up to %ld elements of field-size %d\n", max_elements, field_size);
-			printf("save_restore:manual_array_restore: ...field_type is (%d)\n", field_type);
-		}
+		SR_DBG(10,"save_restore:manual_array_restore: Looking for up to %ld elements of field-size %d\n", max_elements, field_size);
+		SR_DBG(10,"save_restore:manual_array_restore: ...field_type is (%d)\n", field_type);
 
 		switch (field_type) {
 		case DBF_STRING:
@@ -3035,7 +3006,7 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 		case DBF_FLOAT:		p_float = (float *)p_data;           break;
 		case DBF_DOUBLE:	p_double = (double *)p_data;         break;
 		default:
-			printf("save_restore:manual_array_restore: field_type '%d' not handled\n", field_type);
+			SR_ERR("save_restore:manual_array_restore: field_type '%d' not handled\n", field_type);
 			status = -1;
 			break;
 		}
@@ -3043,14 +3014,10 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 
 
 	/** read array values **/
-	if (save_restoreDebug >= 11) {
-		printf("save_restore:manual_array_restore: parsing buffer '%s'\n", value_string);
-	}
+	SR_DBG(11,"save_restore:manual_array_restore: parsing buffer '%s'\n", value_string);
 
 	if (value_string==NULL || *value_string=='\0') {
-		if (save_restoreDebug >= 11) {
-			printf("save_restore:manual_array_restore: value_string is null or empty\n");
-		}
+		SR_DBG(11,"save_restore:manual_array_restore: value_string is null or empty\n");
 		/* nothing to write; write zero or "" */
 		if (p_data && !gobble) {
 			switch (field_type) {
@@ -3066,9 +3033,7 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 			}
 		}
 	} else if ((bp = strchr(value_string, (int)ARRAY_BEGIN)) == NULL) {
-		if (save_restoreDebug >= 11) {
-			printf("save_restore:manual_array_restore: ARRAY_BEGIN not found\n");
-		}
+		SR_DBG(11,"save_restore:manual_array_restore: ARRAY_BEGIN not found\n");
 		/* doesn't look like array data.  just restore what we have */
 		if (p_data && !gobble) {
 			/* We do know the length of the buffer for sure, because this
@@ -3106,24 +3071,18 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 		}
 	} else if ((bp = strchr(value_string, (int)ARRAY_BEGIN)) != NULL) {
 		begin_mark_found = 1;
-		if (save_restoreDebug >= 10) {
-			printf("save_restore:manual_array_restore: parsing array buffer '%s'\n", bp);
-		}
+		SR_DBG(10,"save_restore:manual_array_restore: parsing array buffer '%s'\n", bp);
 		for (num_read=0; bp && !end_mark_found; ) {
 			/* Find beginning of array element */
-			if (save_restoreDebug >= 10) {
-				printf("save_restore:manual_array_restore: looking for element[%ld] \n", num_read);
-			}
+			SR_DBG(10,"save_restore:manual_array_restore: looking for element[%ld] \n", num_read);
 			/* If truncated-file detector (checkFile) fails, test for end of file before
 			 * using *bp */
 			while (!end_mark_found && !end_of_file && (*bp != ELEMENT_BEGIN)) {
-				if (save_restoreDebug >= 12) {
-					printf("save_restore:manual_array_restore: ...buffer contains '%s'\n", bp);
-				}
+				SR_DBG(12,"save_restore:manual_array_restore: ...buffer contains '%s'\n", bp);
 				switch (*bp) {
 				case '\0':
 					if ((bp = fgets(buffer, BUF_SIZE, inp_fd)) == NULL) {
-						printf("save_restore: *** EOF during array-parse\n");
+						SR_ERR("save_restore: *** EOF during array-parse\n");
 						end_of_file = 1;
 					}
 					break;
@@ -3141,20 +3100,16 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 			 */
 			if (bp && !end_mark_found && !end_of_file) {
 				/* *bp == ELEMENT_BEGIN */
-				if (save_restoreDebug >= 11) {
-					printf("save_restore:manual_array_restore: Found element-begin; buffer contains '%s'\n", bp);
-				}
+				SR_DBG(11,"save_restore:manual_array_restore: Found element-begin; buffer contains '%s'\n", bp);
 				for (bp++, j=0; (j < MAX_STRING_SIZE-1) && (*bp != ELEMENT_END); bp++) {
-					if (save_restoreDebug >= 11) printf("save_restore:manual_array_restore: *bp=%c (%d)\n", *bp, (int)*bp);
+					SR_DBG(11,"save_restore:manual_array_restore: *bp=%c (%d)\n", *bp, (int)*bp);
 					if (*bp == '\0') {
 						if ((bp = fgets(buffer, BUF_SIZE, inp_fd)) == NULL) {
-							printf("save_restore:array_restore: *** premature EOF.\n");
+							SR_ERR("save_restore:array_restore: *** premature EOF.\n");
 							end_of_file = 1;
 							break;
 						}
-						if (save_restoreDebug >= 11) {
-							printf("save_restore:manual_array_restore: new buffer: '%s'\n", bp);
-						}
+						SR_DBG(11,"save_restore:manual_array_restore: new buffer: '%s'\n", bp);
 						if (*bp == ELEMENT_END) break;
 					} else if ((*bp == ESCAPE) && ((bp[1] == ELEMENT_BEGIN) || (bp[1] == ELEMENT_END) || (bp[1] == ESCAPE))) {
 						/* escaped character */
@@ -3163,10 +3118,8 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 					if (isprint((int)(*bp))) string[j++] = *bp; /* Ignore, e.g., embedded newline */
 				}
 				string[j] = '\0';
-				if (save_restoreDebug >= 10) {
-					printf("save_restore:manual_array_restore: element[%ld] value = '%s'\n", num_read, string);
-					if (bp) printf("save_restore:manual_array_restore: look for element-end: buffer contains '%s'\n", bp);
-				}
+				SR_DBG(10,"save_restore:manual_array_restore: element[%ld] value = '%s'\n", num_read, string);
+				if (bp) SR_DBG(10,"save_restore:manual_array_restore: look for element-end: buffer contains '%s'\n", bp);
 				/*
 				 * We've accumulated all the characters, or all we can handle in string[].
 				 * If there are more characters than we can handle, just pretend we read them.
@@ -3258,27 +3211,21 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 	/* leave the file pointer ready for next PV (next fgets() should yield next PV) */
 	if (begin_mark_found) {
 		/* find ARRAY_END (but ARRAY_END inside an element is just another character) */
-		if (save_restoreDebug >= 10) {
-			printf("save_restore:manual_array_restore: looking for ARRAY_END\n");
-		}
+		SR_DBG(10,"save_restore:manual_array_restore: looking for ARRAY_END\n");
 		in_element = 0;
 		while (!end_mark_found && !end_of_file) {
-			if (save_restoreDebug >= 11) {
-				printf("save_restore:manual_array_restore: ...buffer contains '%s'\n", bp);
-			}
+			SR_DBG(11,"save_restore:manual_array_restore: ...buffer contains '%s'\n", bp);
 			switch (*bp) {
 			case ESCAPE:
 				if (in_element && (bp[1] == ELEMENT_END)) bp++; /* two chars treated as one */
 				break;
 			case ARRAY_END:
-				if (save_restoreDebug >= 10) {
-					printf("save_restore:manual_array_restore: found ARRAY_END.  in_element=%d\n", in_element);
-				}
+				SR_DBG(10,"save_restore:manual_array_restore: found ARRAY_END.  in_element=%d\n", in_element);
 				if (!in_element) end_mark_found = 1;
 				break;
 			case '\0':
 				if ((bp = fgets(buffer, BUF_SIZE, inp_fd)) == NULL) {
-					printf("save_restore:manual_array_restore: *** EOF during array-end search\n");
+					SR_ERR("save_restore:manual_array_restore: *** EOF during array-end search\n");
 					end_of_file = 1;
 				}
 				break;
@@ -3290,33 +3237,25 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 			if (bp) ++bp;
 		}
 	} else {
-		if (save_restoreDebug >= 10) {
-			printf("save_restore:manual_array_restore: ARRAY_BEGIN wasn't found.\n");
-		}
+		SR_DBG(10,"save_restore:manual_array_restore: ARRAY_BEGIN wasn't found.\n");
 	}
 	if (!status && end_of_file) {
 		status = end_of_file;
-		printf("save_restore:manual_array_restore: status = end_of_file.\n");
+		SR_ERR("save_restore:manual_array_restore: status = end_of_file.\n");
 	}
 
 	if (gobble) {
-		if (save_restoreDebug >= 1) {
-			printf("save_restore:manual_array_restore: Gobbled unused array data.\n");
-		}
+			SR_DBG(1,"save_restore:manual_array_restore: Gobbled unused array data.\n");
 	} else {
 		if (!status && p_data) {
-			if (save_restoreDebug >= 1) {
-				printf("save_restore:manual_array_restore: Writing array to database\n");
-			}
+			SR_DBG(1,"save_restore:manual_array_restore: Writing array to database\n");
 			if (ca_array_put(field_type, num_read, chanid, p_data) != ECA_NORMAL) {
-				printf("save_restore:manual_array_restore: ca_array_put to '%s' failed\n",PVname);
+				SR_ERR("save_restore:manual_array_restore: ca_array_put to '%s' failed\n",PVname);
 				return (-1);
 			}
 		} else {
-			if (save_restoreDebug >= 1) {
-				printf("save_restore:manual_array_restore: No array write to database attempted because of error condition\n");
-				printf("save_restore:manual_array_restore: status=%ld, p_data=%p\n", status, p_data);
-			}
+			SR_DBG(1,"save_restore:manual_array_restore: No array write to database attempted because of error condition\n");
+			SR_DBG(1,"save_restore:manual_array_restore: status=%ld, p_data=%p\n", status, p_data);
 		}
 	}
 	if ((p_data == NULL) && !gobble) status = -1;
@@ -3345,13 +3284,11 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 	MAC_HANDLE      *handle = NULL;
 	char            **pairs = NULL;
 
-	if (save_restoreDebug >= 5) {
-		printf("save_restore:do_manual_restore: entry for file '%s'\n", filename);
-	}
+	SR_DBG(5,"save_restore:do_manual_restore: entry for file '%s'\n", filename);
 	if (file_type == FROM_SAVE_FILE) {
 		/* if this is the current file name for a save set - restore from there */
 		if (waitForListLock(5) == 0) {
-			printf("do_manual_restore:failed to lock resource.  Try later.\n");
+			SR_ERR("do_manual_restore:failed to lock resource.  Try later.\n");
 			return(ERROR);
 		}
 		for (plist=lptr, found=0; plist && !found; ) {
@@ -3364,13 +3301,13 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 		if (found) {
 			/* verify quality of the save set */
 			if (plist->not_connected > 0) {
-				printf("save_restore:do_manual_restore: %d channel(s) not connected or fetched\n",
+				SR_ERR("save_restore:do_manual_restore: %d channel(s) not connected or fetched\n",
 					plist->not_connected);
 				if (!save_restoreIncompleteSetsOk) {
-					printf("save_restore:do_manual_restore: aborting restore\n");
+					SR_ERR("save_restore:do_manual_restore: aborting restore\n");
 					unlockList();
 					strNcpy(SR_recentlyStr, "Manual restore failed",STATUS_STR_LEN);
-					printf("do_manual_restore:failed because some PVs not connected\n");
+					SR_ERR("do_manual_restore:failed because some PVs not connected\n");
 					return(ERROR);
 				}
 			}
@@ -3379,18 +3316,18 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 				if (pchannel->curr_elements <= 1) {
 					status = ca_put(DBR_STRING, pchannel->chid, pchannel->value);
 					if (status!=ECA_NORMAL)
-						printf("do_manual_restore:ca_put() to '%s' failed with %lu.\n",
+						SR_ERR("do_manual_restore:ca_put() to '%s' failed with %lu.\n",
 							pchannel->name, status);
 				} else {
 					status = SR_put_array_values(pchannel->name, pchannel->pArray, pchannel->curr_elements);
 					if (status!=ECA_NORMAL)
-						printf("do_manual_restore:SR_put_array_values() to '%s' failed with %lu.\n",
+						SR_ERR("do_manual_restore:SR_put_array_values() to '%s' failed with %lu.\n",
 							pchannel->name, status);
 				}
 				if (status!=ECA_NORMAL) num_errs++;
 			}
 			if (ca_pend_io(1.0) != ECA_NORMAL) {
-				printf("save_restore:do_manual_restore: not all channels restored\n");
+				SR_WARN("save_restore:do_manual_restore: not all channels restored\n");
 			}
 			unlockList();
 			if (num_errs == 0) {
@@ -3416,7 +3353,7 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 		inp_fd = fopen(restoreFile, "r");
 	}
 	if (inp_fd == NULL) {
-		printf("save_restore:do_manual_restore: Can't open save file.");
+		SR_ERR("save_restore:do_manual_restore: Can't open save file.");
 		strNcpy(SR_recentlyStr, "Manual restore failed",STATUS_STR_LEN);
 		return(ERROR);
 	}
@@ -3456,9 +3393,7 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 		if (strncmp(PVname, "<END>", 5) == 0) {
 			break;
 		}
-		if (save_restoreDebug >= 5) {
-			printf("save_restore:do_manual_restore: PVname='%s'\n", PVname);
-		}
+		SR_DBG(5,"save_restore:do_manual_restore: PVname='%s'\n", PVname);
 		if (isValid1stPVChar((int)PVname[0])) {
 			/* handle long string name */
 			strNcpy(realName, PVname, PV_NAME_LEN);
@@ -3473,10 +3408,8 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 				/* check the field itself, because an empty string is saved as no value at all , which would look like a scalar. */
 				SR_get_array_info(PVname, &num_elements, &field_size, &field_type);
 				if (num_elements > 1) {
-					if (save_restoreDebug >= 5) {
-						printf("save_restore:do_manual_restore: PV '%s' is scalar in .sav file, but has %ld elements.  Treating as array.\n",
-							PVname, num_elements);
-					}
+					SR_DBG(5,"save_restore:do_manual_restore: PV '%s' is scalar in .sav file, but has %ld elements.  Treating as array.\n",
+						PVname, num_elements);
 					is_scalar = 0;
 				}
 			}
@@ -3487,19 +3420,17 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 					epicsStrnRawFromEscaped(value_string, BUF_SIZE, value_string, BUF_SIZE);
 					value_string[40] = '\0';
 					if (ca_search(realName, &chanid) != ECA_NORMAL) {
-						printf("save_restore:do_manual_restore: ca_search for %s failed\n", realName);
+						SR_ERR("save_restore:do_manual_restore: ca_search for %s failed\n", realName);
 						num_errs++;
 					} else if (ca_pend_io(0.5) != ECA_NORMAL) {
-						printf("save_restore:do_manual_restore: ca_search for %s timeout\n", realName);
+						SR_ERR("save_restore:do_manual_restore: ca_search for %s timeout\n", realName);
 						num_errs++;
 					} else if (ca_put(DBR_STRING, chanid, value_string) != ECA_NORMAL) {
-						printf("save_restore:do_manual_restore: ca_put of %s to %s failed\n", value_string,realName);
+						SR_ERR("save_restore:do_manual_restore: ca_put of %s to %s failed\n", value_string,realName);
 						num_errs++;
 					}
 				} else  {
-					if (save_restoreDebug >= 5) {
-						printf("save_restore:do_manual_restore: PV '%s' is long string; value='%s'.\n", PVname, value_string);
-					}
+					SR_DBG(5,"save_restore:do_manual_restore: PV '%s' is long string; value='%s'.\n", PVname, value_string);
 					/* See if we got the whole line */
 					if (bp[strlen(bp)-1] != '\n') {
 						/* No, we didn't.  One more read will certainly accumulate a value string of length BUF_SIZE */
@@ -3512,13 +3443,13 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 					while (bp[strlen(bp)-1] != '\n') bp = fgets(buffer, BUF_SIZE, inp_fd);
 					epicsStrnRawFromEscaped(value_string, BUF_SIZE, value_string, BUF_SIZE);
 					if (ca_search(PVname, &chanid) != ECA_NORMAL) {
-						printf("save_restore:do_manual_restore: ca_search for %s failed\n", PVname);
+						SR_ERR("save_restore:do_manual_restore: ca_search for %s failed\n", PVname);
 						num_errs++;
 					} else if (ca_pend_io(0.5) != ECA_NORMAL) {
 						num_errs++;
 					/* Don't forget trailing null character: "strlen(value_string)+1" below */
 					} else if (ca_array_put(DBR_CHAR, strlen(value_string)+1, chanid, value_string) != ECA_NORMAL) {
-						printf("save_restore:do_manual_restore: ca_array_put of '%s' to '%s' failed\n", value_string,PVname);
+						SR_ERR("save_restore:do_manual_restore: ca_array_put of '%s' to '%s' failed\n", value_string,PVname);
 						num_errs++;
 					}
 				}
@@ -3527,7 +3458,7 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 				int gobble = 0;
 
 				if (ca_search(PVname, &chanid) != ECA_NORMAL) {
-					printf("save_restore:do_manual_restore: ca_search for %s failed\n", PVname);
+					SR_ERR("save_restore:do_manual_restore: ca_search for %s failed\n", PVname);
 					num_errs++;
 					gobble = 1;
 				} else if (ca_pend_io(0.5) != ECA_NORMAL) {
@@ -3538,7 +3469,7 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 
 				if (status) {
 					num_errs++;
-					printf("save_restore:do_manual_restore: manual_array_restore() returned %ld\n", status);
+					SR_ERR("save_restore:do_manual_restore: manual_array_restore() returned %ld\n", status);
 				}
 			}
 			if (chanid) {
@@ -3548,10 +3479,10 @@ STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
 		} else if (PVname[0] == '!') {
 			n = atoi(value_string);	/* value_string actually contains 2nd word of error msg */
 			num_errs += n;
-			printf("save_restore:do_manual_restore: %d PV%c had no saved value\n",
+			SR_ERR("save_restore:do_manual_restore: %d PV%c had no saved value\n",
 				n, (n==1) ? ' ':'s');
 			if (!save_restoreIncompleteSetsOk) {
-				printf("save_restore:do_manual_restore: aborting restore\n");
+				SR_ERR("save_restore:do_manual_restore: aborting restore\n");
 				fclose(inp_fd);
 				if (handle) macDeleteHandle(handle);
 				if (pairs) free(pairs);
@@ -3613,20 +3544,18 @@ int openReqFile(const char *reqFile, FILE **fpp)
 	if (fpp == NULL) {
 		for (i=0; i<NUMRECENT; i++) {
 			if (recentlyFound[i][0] && (strncmp(reqFile, recentlyFound[i], RECENTCHARS-1)==0)) {
-				if (save_restoreDebug > 5) printf("openReqFile: using cached found value for '%s'\n", reqFile);
+				SR_DBG(5,"openReqFile: using cached found value for '%s'\n", reqFile);
 				return(1);
 			}
 			if (recentlyNotFound[i][0] && (strncmp(reqFile, recentlyNotFound[i], RECENTCHARS-1)==0)) {
-				if (save_restoreDebug > 5) printf("openReqFile: using cached not-found value for '%s'\n", reqFile);
+				SR_DBG(5,"openReqFile: using cached not-found value for '%s'\n", reqFile);
 				return(0);
 			}
 		}
 	}
 
 	if (fpp) *fpp = NULL;
-	if (save_restoreDebug > 5) {
-		printf("save_restore:openReqFile: entry: reqFile='%s', fpp=%p\n",	reqFile, fpp);
-	}
+	SR_DBG(5,"save_restore:openReqFile: entry: reqFile='%s', fpp=%p\n",	reqFile, fpp);
 
 	/* open request file */
 	if (reqFilePathList) {
@@ -3643,7 +3572,7 @@ int openReqFile(const char *reqFile, FILE **fpp)
 	if (fpp) *fpp = trial_fd;
 	if (trial_fd) {
 		if (fpp == NULL) fclose(trial_fd);
-		if (save_restoreDebug > 5) printf("openReqFile: found '%s' by searching\n", reqFile);
+		SR_DBG(5,"openReqFile: found '%s' by searching\n", reqFile);
 		for (i=0; i<NUMRECENT-1; i++) {
 			strncpy(recentlyFound[i], recentlyFound[i+1], RECENTCHARS-1);
 		}
@@ -3654,7 +3583,7 @@ int openReqFile(const char *reqFile, FILE **fpp)
 			strncpy(recentlyNotFound[i], recentlyNotFound[i+1], RECENTCHARS-1);
 		}
 		strncpy(recentlyNotFound[0], reqFile, RECENTCHARS-1);
-		if (save_restoreDebug > 5) printf("openReqFile: didn't find '%s' by searching\n", reqFile);
+		SR_DBG(5,"openReqFile: didn't find '%s' by searching\n", reqFile);
 		return(0);
 	}
 }
@@ -3671,17 +3600,15 @@ STATIC int readReqFile(const char *reqFile, struct chlist *plist, char *macrostr
 	char            **pairs = NULL;
 	char			*c;
 
-	if (save_restoreDebug > 1) {
-		printf("save_restore:readReqFile: entry: reqFile='%s', plist=%p, macrostring='%s'\n",
-			reqFile, (void *)plist, macrostring?macrostring:"NULL");
-	}
+	SR_DBG(1,"save_restore:readReqFile: entry: reqFile='%s', plist=%p, macrostring='%s'\n",
+		reqFile, (void *)plist, macrostring?macrostring:"NULL");
 
 	(void)openReqFile(reqFile, &inp_fd);
 	if (!inp_fd) {
 		plist->status = SR_STATUS_FAIL;
 		strNcpy(plist->statusStr, "Can't open .req file", STATUS_STR_LEN);
 		TRY_TO_PUT_AND_FLUSH(DBR_STRING, plist->statusStr_chid, &plist->statusStr);
-		printf("save_restore:readReqFile: unable to open file %s. Exiting.\n", reqFile);
+		SR_ERR("save_restore:readReqFile: unable to open file %s. Exiting.\n", reqFile);
 		return(ERROR);
 	}
 
@@ -3729,12 +3656,12 @@ STATIC int readReqFile(const char *reqFile, struct chlist *plist, char *macrostr
 			strNcpy(eline, line, EBUF_SIZE);
 		}
 		sscanf(eline, "%s", name);
-		if (save_restoreDebug >= 2) printf("save_restore:readReqFile: line='%s', eline='%s', name='%s'\n", line, eline, name);
+		SR_DBG(2,"save_restore:readReqFile: line='%s', eline='%s', name='%s'\n", line, eline, name);
 		if (name[0] == '#') {
 			/* take the line as a comment */
 		} else if (strncmp(eline, "file", 4) == 0) {
 			/* handle include file */
-			if (save_restoreDebug >= 2) printf("save_restore:readReqFile: preparing to include file: eline='%s'\n", eline);
+			SR_DBG(2,"save_restore:readReqFile: preparing to include file: eline='%s'\n", eline);
 
 			/* parse template-file name and fix obvious problems */
 			templatefile[0] = '\0';
@@ -3770,7 +3697,7 @@ STATIC int readReqFile(const char *reqFile, struct chlist *plist, char *macrostr
 			new_macro[i] = 0;
 			if (i && new_macro[i-1] == ',') new_macro[--i] = 0;
 			if (i < 3) new_macro[0] = 0; /* if macro has less than 3 chars, punt */
-			if (save_restoreDebug >= 2) printf("save_restore:readReqFile: calling readReqFile('%s', %p,'%s')\n",
+			SR_DBG(2,"save_restore:readReqFile: calling readReqFile('%s', %p,'%s')\n",
 				templatefile, plist, new_macro);
 			readReqFile(templatefile, plist, new_macro);
 		} else if (isValid1stPVChar(name[0]) || name[0] == '$') {
@@ -3779,7 +3706,7 @@ STATIC int readReqFile(const char *reqFile, struct chlist *plist, char *macrostr
 				plist->status = SR_STATUS_WARN;
 				strNcpy(plist->statusStr, "Can't alloc channel memory", EBUF_SIZE);
 				TRY_TO_PUT_AND_FLUSH(DBR_STRING, plist->statusStr_chid, &plist->statusStr);
-				printf("save_restore:readReqFile: channel calloc failed");
+				SR_ERR("save_restore:readReqFile: channel calloc failed");
 			} else {
 				/* add new element to the list */
 #if BACKWARDS_LIST
@@ -3831,8 +3758,7 @@ STATIC int readReqFile(const char *reqFile, struct chlist *plist, char *macrostr
 		if (pairs) free(pairs);
 	}
 
-	if (save_restoreDebug > 1)
-		printf("save_restore:readReqFile: exit: reqFile='%s'.\n", reqFile);
+	SR_DBG(1,"save_restore:readReqFile: exit: reqFile='%s'.\n", reqFile);
 	return(OK);
 }
 
@@ -3850,12 +3776,39 @@ int findConfigList(char *configName, char *requestFileName) {
 	return(-1);
 }
 
+void SR_log(SR_log_level_t level, const char* fmt, ...) {
+	char buf[16384];
+	va_list vl;
+	if (level < save_restoreLogLevel)
+		return;
+
+	epicsTimeStamp dst;
+	epicsTimeGetCurrent(&dst);
+	epicsTimeToStrftime(buf, sizeof(buf), "[%y/%m/%d-%H:%M:%S] ", &dst);
+	fputs(buf, epicsGetStdout());
+
+	va_start(vl, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, vl);
+	va_end(vl);
+	fputs(buf, epicsGetStdout());
+}
+
+static void save_restoreSetLogLevel(const iocshArgBuf* args) {
+	int level = args[0].ival;
+	save_restoreDebug = level <= 0 ? -level : 0;
+	save_restoreLogLevel = level;
+}
+
 /*-------------------------------------------------------------------------------*/
 /*** ioc-shell command registration (sheesh!) ***/
 
 #define IOCSH_ARG		static const iocshArg
 #define IOCSH_ARG_ARRAY	static const iocshArg * const
 #define IOCSH_FUNCDEF	static const iocshFuncDef
+
+IOCSH_ARG		save_restoreSetLogLevelArg0 = {"level", iocshArgInt};
+IOCSH_ARG_ARRAY save_restoreSetLogLevelArgs[1] = {&save_restoreSetLogLevelArg0};
+IOCSH_FUNCDEF	save_restoreSetLogLevel_FuncDef = {"save_restoreSetLogLevel", 1, save_restoreSetLogLevelArgs};
 
 /* int fdbrestore(char *filename); */
 IOCSH_ARG       fdbrestore_Arg0    = {"filename",iocshArgString};
@@ -4105,6 +4058,7 @@ void save_restoreRegister(void)
     iocshRegister(&save_restoreSet_CallbackTimeout_FuncDef, save_restoreSet_CallbackTimeout_CallFunc);
     iocshRegister(&asVerify_FuncDef, asVerify_CallFunc);
 	iocshRegister(&save_restoreSet_periodicDatedBackups_FuncDef, save_restoreSet_periodicDatedBackups_CallFunc);
+	iocshRegister(&save_restoreSetLogLevel_FuncDef, save_restoreSetLogLevel);
 }
 
 epicsExportRegistrar(save_restoreRegister);

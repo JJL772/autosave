@@ -2,6 +2,7 @@
 
 #include <ellLib.h> /* pass0List, pass1List */
 #include <initHooks.h>
+#include <compilerSpecific.h>
 
 #define STATIC_VARS 0
 #define DEBUG 1
@@ -110,6 +111,24 @@ extern int openReqFile(const char *reqFile, FILE **fpp);
 extern int eraseFile(const char *filename);
 extern int appendToFile(const char *filename, const char *line);
 extern float mySafeDoubleToFloat(double d);
+
+typedef enum SR_log_level {
+	SR_LOG_DEBUG_MAX = -15,
+	SR_LOG_DEBUG = 0,
+	SR_LOG_VERBOSE,
+	SR_LOG_INFO,
+	SR_LOG_WARN,
+	SR_LOG_ERR,
+} SR_log_level_t;
+extern SR_log_level_t save_restoreLogLevel;
+
+extern void SR_log(SR_log_level_t level, const char* fmt, ...) EPICS_PRINTF_STYLE(2,3);
+
+#define SR_INFO(...) SR_log(SR_LOG_INFO,__VA_ARGS__)
+#define SR_ERR(...) SR_log(SR_LOG_ERR,__VA_ARGS__)
+#define SR_WARN(...) SR_log(SR_LOG_WARN,__VA_ARGS__)
+#define SR_DBG(_level,...) SR_log(SR_LOG_DEBUG-_level, __VA_ARGS__)
+#define SR_VERBOSE(...) SR_log(SR_LOG_VERBOSE, __VA_ARGS__)
 
 /* strncpy sucks (may copy extra characters, may not null-terminate) */
 #define strNcpy(dest, src, N) {			\
