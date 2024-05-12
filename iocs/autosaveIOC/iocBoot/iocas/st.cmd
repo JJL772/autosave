@@ -1,20 +1,8 @@
 # vxWorks startup script
 
-cd ""
 < ../nfsCommands
 < envPaths
 
-################################################################################
-cd topbin
-
-# If the VxWorks kernel was built using the project facility, the following must
-# be added before any C++ code is loaded (see SPR #28980).
-sysCplusEnable=1
-
-### Load custom EPICS software from user tree and from share
-ld < as.munch
-
-cd startup
 ################################################################################
 # Tell EPICS all about the record types, device-support modules, drivers,
 # etc. in the software we just loaded (as.munch)
@@ -24,10 +12,6 @@ as_registerRecordDeviceDriver(pdbbase)
 # save_restore setup
 < save_restore.cmd
 
-###############################################################################
-# Set shell prompt (otherwise it is left at mv167 or mv162)
-shellPromptSet "iocas> "
-iocLogDisable=1
 iocInit
 
 ### Start up the autosave task and tell it what to do.
