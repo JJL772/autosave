@@ -410,15 +410,15 @@ STATIC int save_restore(void);
 STATIC int connect_list(struct chlist *plist, int verbose);
 STATIC int enable_list(struct chlist *plist);
 STATIC int get_channel_values(struct chlist *plist);
-STATIC int write_it(char *filename, struct chlist *plist);
+STATIC int write_it(const char *filename, struct chlist *plist);
 STATIC int write_save_file(struct chlist *plist, const char *configName, char *retSaveFile);
 STATIC void do_seq(struct chlist *plist);
-STATIC int create_data_set(char *filename, int save_method, int period,
-		char *trigger_channel, int mon_period, char *macrostring);
-STATIC int do_manual_restore(char *filename, int file_type, char *macrostring);
-STATIC int readReqFile(const char *file, struct chlist *plist, char *macrostring);
-STATIC int do_remove_data_set(char *filename);
-STATIC int request_manual_restore(char *filename, int file_type, char *macrostring, callbackFunc callbackFunction, void *puserPvt);
+STATIC int create_data_set(const char *filename, int save_method, int period,
+		const char *trigger_channel, int mon_period, const char *macrostring);
+STATIC int do_manual_restore(const char *filename, int file_type, const char *macrostring);
+STATIC int readReqFile(const char *file, struct chlist *plist, const char *macrostring);
+STATIC int do_remove_data_set(const char *filename);
+STATIC int request_manual_restore(const char *filename, int file_type, const char *macrostring, callbackFunc callbackFunction, void *puserPvt);
 
 STATIC void ca_connection_callback(struct connection_handler_args args);      /* qiao: call back function for ca connection of the dataset channels */
 STATIC void ca_disconnect();                                                  /* qiao: disconnect all existing CA channels */
@@ -427,31 +427,31 @@ STATIC void doPeriodicDatedBackup(struct chlist *plist);
 
 /*** user-callable functions ***/
 
-int fdbrestore(char *filename);
-int set_savefile_name(char *filename, char *save_filename);
-int create_periodic_set(char *filename, int period, char *macrostring);
-int create_triggered_set(char *filename, char *trigger_channel, char *macrostring);
-int create_monitor_set(char *filename, int period, char *macrostring);
-int create_manual_set(char *filename, char *macrostring);
+int fdbrestore(const char *filename);
+int set_savefile_name(const char *filename, const char *save_filename);
+int create_periodic_set(const char *filename, int period, const char *macrostring);
+int create_triggered_set(const char *filename, const char *trigger_channel, const char *macrostring);
+int create_monitor_set(const char *filename, int period, const char *macrostring);
+int create_manual_set(const char *filename, const char *macrostring);
 void save_restoreShow(int verbose);
-int set_requestfile_path(char *path, char *pathsub);
-int set_savefile_path(char *path, char *pathsub);
+int set_requestfile_path(const char *path, const char *pathsub);
+int set_savefile_path(const char *path, const char *pathsub);
 int set_saveTask_priority(int priority);
-int remove_data_set(char *filename);
-int reload_periodic_set(char *filename, int period, char *macrostring);
-int reload_triggered_set(char *filename, char *trigger_channel, char *macrostring);
-int reload_monitor_set(char * filename, int period, char *macrostring);
-int reload_manual_set(char * filename, char *macrostring);
+int remove_data_set(const char *filename);
+int reload_periodic_set(const char *filename, int period, const char *macrostring);
+int reload_triggered_set(const char *filename, const char *trigger_channel, const char *macrostring);
+int reload_monitor_set(const char * filename, int period, const char *macrostring);
+int reload_manual_set(const char * filename, const char *macrostring);
 
 /* callable from a client */
-int findConfigFiles(char *config, ELLLIST *configMenuList);
+int findConfigFiles(const char *config, ELLLIST *configMenuList);
 
 /* The following user-callable functions have an abridged argument list for iocsh use,
  * and a full argument list for calls from local client code.
  */
-int fdbrestoreX(char *filename, char *macrostring, callbackFunc callbackFunction, void *puserPvt);
-int manual_save(char *request_file, char *save_file, callbackFunc callbackFunction, void *puserPvt);
-char *getMacroString(char *request_file);
+int fdbrestoreX(const char *filename, const char *macrostring, callbackFunc callbackFunction, void *puserPvt);
+int manual_save(const char *request_file, const char *save_file, callbackFunc callbackFunction, void *puserPvt);
+char *getMacroString(const char *request_file);
 
 /* functions to set save_restore parameters */
 void save_restoreSet_Debug(int level) {save_restoreDebug = level;}
@@ -469,7 +469,7 @@ void save_restoreSet_periodicDatedBackups(int periodInMinutes) {
 		save_restorePeriodicDatedBackups = 0;
 	}
 }
-void save_restoreSet_status_prefix(char *prefix) {strNcpy(status_prefix, prefix, 30);}
+void save_restoreSet_status_prefix(const char *prefix) {strNcpy(status_prefix, prefix, 30);}
 #if SET_FILE_PERMISSIONS
 void save_restoreSet_FilePermissions(int permissions) {
 	file_permissions = (mode_t)permissions;
@@ -626,7 +626,7 @@ STATIC void on_change_save(struct event_handler_args event)
 }
 
 
-int findConfigFiles(char *config, ELLLIST *configMenuList) {
+int findConfigFiles(const char *config, ELLLIST *configMenuList) {
 	int found;
 	DIR *pdir=0;
 	FILE *fd;
@@ -710,7 +710,7 @@ int findConfigFiles(char *config, ELLLIST *configMenuList) {
 	return(-1);
 }
 
-int manual_save(char *request_file, char *save_file, callbackFunc callbackFunction, void *puserPvt)
+int manual_save(const char *request_file, const char *save_file, callbackFunc callbackFunction, void *puserPvt)
 {
 	op_msg msg;
 
@@ -1681,13 +1681,14 @@ STATIC int get_channel_values(struct chlist *plist)
 #define BS_OK		2	/* File is good */
 #define BS_NEW		3	/* Just wrote the file */
 
-STATIC int check_file(char *file)
+STATIC int check_file(const char *file)
 {
 	FILE *fd;
 	char tmpstr[20];
 	int	 file_state = BS_NONE;
 
 	if ((fd = fopen(file, "r")) != NULL) {
+		setvbuf(fd, NULL, _IOFBF, 65535);
 		if (fseek(fd, -7, SEEK_END)) {
 			printf("save_restore:check_file: seek failed\n");
 			file_state = BS_BAD;
@@ -1778,7 +1779,7 @@ void print_chmod_error(int errNumber)
  */
 #define FPRINTF_FAILED	1
 #define CLOSE_FAILED 	2
-STATIC int write_it(char *filename, struct chlist *plist)
+STATIC int write_it(const char *filename, struct chlist *plist)
 {
 	FILE 			*out_fd;
 	int 			filedes = -1;
@@ -1823,6 +1824,7 @@ STATIC int write_it(char *filename, struct chlist *plist)
 	}
 #else
 	if ((out_fd = fopen(filename,"w")) == NULL) {
+		setvbuf(out_fd, NULL, _IOFBF, 65535);
 		printf("save_restore:write_it - unable to open file '%s' [%s]\n",
 			filename, datetime);
 		if (errno) myPrintErrno("write_it", __FILE__, __LINE__);
@@ -2113,6 +2115,7 @@ STATIC int write_save_file(struct chlist *plist, const char *configName, char *r
 		FILE *test_fd;
 
 		if ((test_fd = fopen(save_file,"rb")) != NULL) {
+			setvbuf(test_fd, NULL, _IOFBF, 65535);
 			fclose(test_fd);
 			fGetDateStr(datetime);
 			strNcpy(backup_file, save_file, NFS_PATH_LEN);
@@ -2294,7 +2297,7 @@ STATIC void doPeriodicDatedBackup(struct chlist *plist) {
 }
 
 /* Called only by the user */
-int set_savefile_name(char *filename, char *save_filename)
+int set_savefile_name(const char *filename, const char *save_filename)
 {
 	struct chlist	*plist;
 
@@ -2318,13 +2321,13 @@ int set_savefile_name(char *filename, char *save_filename)
 }
 
 
-int create_periodic_set(char *filename, int period, char *macrostring)
+int create_periodic_set(const char *filename, int period, const char *macrostring)
 {
 	return(create_data_set(filename, PERIODIC, period, 0, 0, macrostring));
 }
 
 
-int create_triggered_set(char *filename, char *trigger_channel, char *macrostring)
+int create_triggered_set(const char *filename, const char *trigger_channel, const char *macrostring)
 {
 	if (trigger_channel && isValid1stPVChar((int)trigger_channel[0])) {
 		return(create_data_set(filename, TRIGGERED, 0, trigger_channel, 0, macrostring));
@@ -2336,13 +2339,13 @@ int create_triggered_set(char *filename, char *trigger_channel, char *macrostrin
 }
 
 
-int create_monitor_set(char *filename, int period, char *macrostring)
+int create_monitor_set(const char *filename, int period, const char *macrostring)
 {
 	return(create_data_set(filename, MONITORED, 0, 0, period, macrostring));
 }
 
 
-int create_manual_set(char *filename, char *macrostring)
+int create_manual_set(const char *filename, const char *macrostring)
 {
 	return(create_data_set(filename, MANUAL, 0, 0, 0, macrostring));
 }
@@ -2352,12 +2355,12 @@ int create_manual_set(char *filename, char *macrostring)
  * create a data set
  */
 STATIC int create_data_set(
-	char	*filename,			/* save set request file */
+	const char	*filename,			/* save set request file */
 	int		save_method,
-	int		period,				/* maximum time between saves  */
-	char	*trigger_channel,	/* db channel to trigger save  */
-	int		mon_period,			/* minimum time between saves  */
-	char	*macrostring
+	int		period,					/* maximum time between saves  */
+	const char	*trigger_channel,	/* db channel to trigger save  */
+	int		mon_period,				/* minimum time between saves  */
+	const char	*macrostring
 )
 {
 	struct chlist	*plist;
@@ -2630,7 +2633,7 @@ void save_restoreShow(int verbose)
 }
 
 
-int set_requestfile_path(char *path, char *pathsub)
+int set_requestfile_path(const char *path, const char *pathsub)
 {
 	struct pathListElement *p, *pnew;
 	char fullpath[NFS_PATH_LEN+1] = "";
@@ -2671,7 +2674,7 @@ int set_requestfile_path(char *path, char *pathsub)
 	}
 }
 
-int set_savefile_path(char *path, char *pathsub)
+int set_savefile_path(const char *path, const char *pathsub)
 {
 	char fullpath[NFS_PATH_LEN] = "";
 	int NFS_managed = save_restoreNFSHostName[0] && save_restoreNFSHostAddr[0] && save_restoreNFSMntPoint[0];
@@ -2716,7 +2719,7 @@ int set_saveTask_priority(int priority)
 	return(OK);
 }
 
-STATIC int remove_data_set(char *filename)
+STATIC int remove_data_set(const char *filename)
 {
 	op_msg msg;
 
@@ -2731,7 +2734,7 @@ STATIC int remove_data_set(char *filename)
 }
 
 /*** remove a data set from the list ***/
-STATIC int do_remove_data_set(char *filename)
+STATIC int do_remove_data_set(const char *filename)
 {
 	int found = 0;
 	int numchannels = 0;
@@ -2798,7 +2801,7 @@ STATIC int do_remove_data_set(char *filename)
 	return(OK);
 }
 
-int reload_periodic_set(char *filename, int period, char *macrostring)
+int reload_periodic_set(const char *filename, int period, const char *macrostring)
 {
 	op_msg msg;
 
@@ -2818,7 +2821,7 @@ int reload_periodic_set(char *filename, int period, char *macrostring)
 	return(0);
 }
 
-int reload_triggered_set(char *filename, char *trigger_channel, char *macrostring)
+int reload_triggered_set(const char *filename, const char *trigger_channel, const char *macrostring)
 {
 	op_msg msg;
 
@@ -2839,7 +2842,7 @@ int reload_triggered_set(char *filename, char *trigger_channel, char *macrostrin
 }
 
 
-int reload_monitor_set(char * filename, int period, char *macrostring)
+int reload_monitor_set(const char * filename, int period, const char *macrostring)
 {
 	op_msg msg;
 
@@ -2859,7 +2862,7 @@ int reload_monitor_set(char * filename, int period, char *macrostring)
 	return(0);
 }
 
-int reload_manual_set(char * filename, char *macrostring)
+int reload_manual_set(const char * filename, const char *macrostring)
 {
 	op_msg msg;
 	
@@ -2878,13 +2881,13 @@ int reload_manual_set(char * filename, char *macrostring)
 	return(0);
 }
 
-int fdbrestore(char *filename)
+int fdbrestore(const char *filename)
 {
 	printf("save_restore:fdbrestore:entry\n");
 	return(request_manual_restore(filename, FROM_SAVE_FILE, NULL, NULL, NULL));
 }
 
-int fdbrestoreX(char *filename, char *macrostring, callbackFunc callbackFunction, void *puserPvt)
+int fdbrestoreX(const char *filename, const char *macrostring, callbackFunc callbackFunction, void *puserPvt)
 {
 	return(request_manual_restore(filename, FROM_ASCII_FILE, macrostring, callbackFunction, puserPvt));
 }
@@ -2893,7 +2896,7 @@ STATIC void defaultCallback(int status, void *puserPvt) {
 	printf("save_restore:defaultCallback:status=%d\n", status);
 }
 
-STATIC int request_manual_restore(char *filename, int file_type, char *macrostring, callbackFunc callbackFunction, void *puserPvt)
+STATIC int request_manual_restore(const char *filename, int file_type, const char *macrostring, callbackFunc callbackFunction, void *puserPvt)
 {
 	op_msg msg;
 
@@ -2956,7 +2959,7 @@ int asVerify(char *filename, int verbose, char *restoreFileName) {
 	return(0);
 }
 
-char *getMacroString(char *request_file)
+char *getMacroString(const char *request_file)
 {
 	struct chlist	*plist;
 	int				found;
@@ -3326,7 +3329,7 @@ STATIC int manual_array_restore(FILE *inp_fd, char *PVname, chid chanid, char *v
 
 
 
-STATIC int do_manual_restore(char *filename, int file_type, char *macrostring)
+STATIC int do_manual_restore(const char *filename, int file_type, const char *macrostring)
 {
 	struct channel	*pchannel;
 	struct chlist	*plist;
@@ -3660,7 +3663,7 @@ int openReqFile(const char *reqFile, FILE **fpp)
 	}
 }
 
-STATIC int readReqFile(const char *reqFile, struct chlist *plist, char *macrostring)
+STATIC int readReqFile(const char *reqFile, struct chlist *plist, const char *macrostring)
 {
 	struct channel	*pchannel = NULL;
 	FILE   			*inp_fd = NULL;

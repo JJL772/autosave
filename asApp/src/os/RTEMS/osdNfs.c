@@ -36,6 +36,7 @@ extern volatile int save_restoreDebug;
  */
 int mountFileSystem(char *uidhost, char *addr, char *path, char *mntpoint)
 {
+#ifdef RTEMS_LEGACY_STACK
     /* check the input parameters */
     if (!uidhost || !uidhost[0])   return NFS_INVALID_HOST;
     if (!path || !path[0])         return NFS_INVALID_PATH;
@@ -50,6 +51,9 @@ int mountFileSystem(char *uidhost, char *addr, char *path, char *mntpoint)
         save_restoreNFSOK = 0;
         return NFS_FAILURE;
     }
+#else
+	return NFS_FAILURE;
+#endif
 }
 
 /**
@@ -63,6 +67,7 @@ int mountFileSystem(char *uidhost, char *addr, char *path, char *mntpoint)
  */ 
 int dismountFileSystem(char *mntpoint)
 {
+#ifdef RTEMS_LEGACY_STACK
     /* check the input parameters */
     if (!mntpoint || !mntpoint[0]) return NFS_INVALID_MNTPOINT;
 
@@ -73,6 +78,9 @@ int dismountFileSystem(char *mntpoint)
     } else {
         return NFS_FAILURE;
     }
+#else
+	return NFS_FAILURE;
+#endif
 }
 
 
